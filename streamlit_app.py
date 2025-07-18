@@ -23,11 +23,23 @@ if "agent_cfgs" not in st.session_state:
 for i in range(a_num):
     cfg = st.session_state.agent_cfgs[i]
     st.sidebar.text_input(f"Agent {i+1} Name", value=cfg["name"], key=f"name{i}")
+    provider_options = ["openai", "anthropic", "mistral", "local"]
     st.sidebar.selectbox(
-        "Provider", ["openai", "anthropic", "mistral", "local"],
-        index=["openai","anthropic","mistral","local"].index(cfg["provider_name"]),
+        "Provider", provider_options,
+        index=provider_options.index(cfg["provider_name"]),
         key=f"prov{i}")
-    st.sidebar.text_input("Model", value=cfg["model"], key=f"model{i}")
+    # Model dropdown options per provider
+    model_options = {
+        "openai": ["gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
+        "anthropic": ["claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1"],
+        "mistral": ["mistral-large-latest", "mistral-medium", "mistral-small"],
+        "local": ["llama3", "llama2", "mistral-7b", "custom"]
+    }
+    selected_provider = st.session_state.get(f"prov{i}", cfg["provider_name"])
+    st.sidebar.selectbox(
+        "Model", model_options.get(selected_provider, [cfg["model"]]),
+        index=model_options.get(selected_provider, [cfg["model"]]).index(cfg["model"]) if cfg["model"] in model_options.get(selected_provider, [cfg["model"]]) else 0,
+        key=f"model{i}")
 
 judge_model = st.sidebar.text_input("Judge Model (OpenAI)", value="gpt-4o-mini")
 
@@ -64,7 +76,19 @@ if st.button("Start Debate") and user_topic:
     conf = DebateConfig(cfgs, judge_cfg, auto_run)
     st.session_state.orch = DebateOrchestrator(conf)
     st.session_state.topic = user_topic
-    st.session_state.run_task = asyncio.create_task(st.session_state.orch.next_round(user_topic))
+    
+    # Use asyncio.run() instead of create_task
+    import nest_asyncio
+    nest_asyncio.apply()
+    
+    # Run in a way that's compatible with Streamlit
+    try:
+        # For first round only
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(st.session_state.orch.next_round(user_topic))
+    except Exception as e:
+        st.error(f"Error starting debate: {e}")
 
 # Async poll helper
 async def poll_loop():
@@ -89,7 +113,13 @@ if "orch" in st.session_state:
     # Controls
     col1, col2 = st.columns(2)
     if col1.button("Advance Round") and not orch.config.auto and not orch.stopped:
-        asyncio.create_task(orch.next_round(st.session_state.topic))
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(orch.next_round(st.session_state.topic))
+            st.experimental_rerun()  # Force UI update
+        except Exception as e:
+            st.error(f"Error advancing round: {e}")
     if col2.button("Stop Debate"):
         orch.stopped = True
 

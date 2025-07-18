@@ -21,6 +21,12 @@ def register(name: str):
     return _wrap
 
 def create(name: str, model: str) -> Provider:
+    # Import here to ensure providers are registered
+    import providers.openai_provider
+    import providers.anthropic_provider
+    import providers.mistral_provider
+    import providers.local_provider
+    
     if name not in _REG:
         raise ValueError(f"Unknown provider '{name}'. Registered: {list(_REG)}")
     return _REG[name](model)

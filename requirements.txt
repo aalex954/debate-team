@@ -13,3 +13,4 @@ scikit-learn>=1.7.0
 sentence-transformers>=5.0.0
 # Orchestration
 pocketflow>=0.0.1  # lightweight DAG/async task runner
+nest_asyncio>=1.5.6
