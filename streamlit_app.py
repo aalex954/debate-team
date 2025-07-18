@@ -10,13 +10,11 @@ st.sidebar.header("Agent Config")
 
 def default_agents():
     return [
-        {"name": "Alice‑OpenAI", "provider_name": "openai", "model": "gpt-4o-mini"},
-        {"name": "Bob‑Anthropic", "provider_name": "anthropic", "model": "claude-3-sonnet-20240229"},
-        {"name": "Cora‑Mistral", "provider_name": "mistral", "model": "mistral-large-latest"},
-        {"name": "Dave‑Local", "provider_name": "local", "model": "llama3"},
+        {"name": "OpenAI", "provider_name": "openai", "model": "gpt-4o-mini"},
+        {"name": "Mistral", "provider_name": "mistral", "model": "mistral-large-latest"},
     ]
 
-a_num = st.sidebar.number_input("# Agents", min_value=2, max_value=8, value=4)
+a_num = st.sidebar.number_input("# Agents", min_value=2, max_value=8, value=2)  # Default to 2 agents
 if "agent_cfgs" not in st.session_state:
     st.session_state.agent_cfgs = default_agents()[:a_num]
 
