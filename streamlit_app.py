@@ -69,13 +69,14 @@ if st.button("Start Debate") and user_topic:
 # Async poll helper
 async def poll_loop():
     while True:
-        orch: DebateOrchestrator = st.session_state.get("orch")
+        from typing import Optional
+        orch: Optional[DebateOrchestrator] = st.session_state.get("orch")
         if not orch: break
         if orch.stopped: break
         await asyncio.sleep(0.1)
 
 if "orch" in st.session_state:
-    orch: DebateOrchestrator = st.session_state.orch
+    orch = st.session_state.orch
     # Display transcripts
     for ag in orch.agents:
         with st.expander(f"{ag.name}"):

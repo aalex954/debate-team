@@ -33,6 +33,10 @@ class Judge(Agent):
         )
         raw = await self.provider.complete(prompt)
         try:
-            return json.loads(re.search(r"\{.*\}", raw, re.S).group())
+            match = re.search(r"\{.*\}", raw, re.S)
+            if match:
+                return json.loads(match.group())
+            else:
+                return {"agreement": False, "mean_agreement": 0, "explanation": raw[:200]}
         except Exception:
             return {"agreement": False, "mean_agreement": 0, "explanation": raw[:200]}

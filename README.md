@@ -9,6 +9,10 @@ similarity, and run a Judge agent.
 ---
 ## Quick Start
 ```bash
+# Clone the repository
+git clone https://github.com/aalex954/yeet-agent.git
+cd yeet-agent
+
 # Create virtual environment
 python -m venv .venv
 
@@ -18,27 +22,39 @@ source .venv/bin/activate
 # Windows:
 .venv\Scripts\Activate.ps1
 
+# Install dependencies
+pip install -r requirements.txt
 
-# 1. Clone repo & cd in
-pipx run python-poetry@^1.8 install  # or ➜ pip install -r requirements.txt
-
-# 2. Set API keys (examples)
-
-# ▸ Bash / Git Bash / WSL
-export OPENAI_API_KEY="sk‑..."
-export ANTHROPIC_API_KEY="sk‑anth‑..."
-export MISTRAL_API_KEY="sk‑ms‑..."
-
-# ▸ Windows PowerShell
-setx OPENAI_API_KEY "sk‑..."
-setx ANTHROPIC_API_KEY "sk‑anth‑..."
-
-# ▸ Local provider (Ollama)
-# Ensure `ollama serve` is running locally.
-
-# 3. Launch
+# Launch App
 streamlit run streamlit_app.py
 ```
+
+### API Key Setup
+
+You need at least one API key from the supported providers:
+
+#### Linux/Mac
+```bash
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export MISTRAL_API_KEY="..."
+```
+
+#### Windows PowerShell (Temporary)
+```powershell
+$env:OPENAI_API_KEY = "sk-..."
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:MISTRAL_API_KEY = "..."
+```
+
+#### Windows PowerShell (Persistent)
+```powershell
+setx OPENAI_API_KEY "sk-..."
+setx ANTHROPIC_API_KEY "sk-ant-..."
+setx MISTRAL_API_KEY "..."
+```
+> **Note**: Close and reopen your terminal after using `setx` to pick up the new variables.
+
 ---
 
 ```
