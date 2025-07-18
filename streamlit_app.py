@@ -99,9 +99,33 @@ async def poll_loop():
 
 if "orch" in st.session_state:
     orch = st.session_state.orch
-    # Display transcripts
+    
+    # Helper function to create one-line summaries
+    def get_summary(text, max_length=100):
+        # Get first sentence or first part of text
+        if "." in text[:150]:
+            summary = text.split(".", 1)[0] + "."
+        else:
+            summary = text[:max_length]
+            if len(text) > max_length:
+                summary += "..."
+        return summary.replace("\n", " ").strip()
+    
+    # Display transcripts with summaries in expander headers
     for ag in orch.agents:
-        with st.expander(f"{ag.name}"):
+        # Get latest transcript entry for summary in header
+        latest = None
+        if ag.transcript:
+            latest = ag.transcript[-1]
+        
+        # Create expander header with summary if available
+        if latest:
+            summary = get_summary(latest["content"])
+            header = f"{ag.name}: {summary}"
+        else:
+            header = f"{ag.name}"
+            
+        with st.expander(header):
             for turn in ag.transcript:
                 st.markdown(f"**{turn['round'].capitalize()}** → {turn['content']}")
     # Verdicts
