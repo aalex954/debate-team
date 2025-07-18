@@ -124,6 +124,70 @@ if "orch" in st.session_state:
     st.write("\n---\n")
     st.write(f"**Phase:** {orch.phase} • **Round:** {orch.round_num}")
 
+    # Round Counter and Winning Indicator
+    st.markdown("### Debate Progress")
+    col1, col2 = st.columns(2)
+
+    # Round counter with progress bar
+    total_rounds = 5  # Assume 5 rounds is a full debate
+    progress = min(orch.round_num / total_rounds, 1.0)
+    col1.metric("Current Round", f"{orch.round_num}")
+    col1.progress(progress)
+
+    # Winning indicator based on judge verdicts
+    if orch.history:
+        # Calculate scores for each agent based on judge verdicts
+        agent_scores = {ag.name: 0 for ag in orch.agents}
+        
+        for item in orch.history:
+            verdict = item['verdict']
+            
+            # Check if agent mentions exist in the verdict
+            if 'agent_scores' in verdict:
+                # Direct scores from judge
+                for agent_name, score in verdict['agent_scores'].items():
+                    if agent_name in agent_scores:
+                        agent_scores[agent_name] += float(score)
+            elif 'analysis' in verdict:
+                # Parse analysis text for agent mentions
+                analysis = verdict['analysis'].lower()
+                for agent_name in agent_scores:
+                    name_lower = agent_name.lower()
+                    # Award points for positive mentions in analysis
+                    if name_lower in analysis:
+                        # Find nearby positive sentiment words
+                        positive_words = ['strong', 'compelling', 'convincing', 'valid', 'sound', 'good']
+                        for word in positive_words:
+                            if word in analysis and abs(analysis.find(name_lower) - analysis.find(word)) < 50:
+                                agent_scores[agent_name] += 0.5
+        
+        # Normalize scores between 0 and 1
+        max_score = max(agent_scores.values()) if agent_scores.values() else 1
+        if max_score > 0:
+            normalized_scores = {name: score/max_score for name, score in agent_scores.items()}
+        else:
+            normalized_scores = agent_scores
+        
+        # Display winning indicator
+        col2.subheader("Current Standing")
+        
+        # Sort agents by score
+        sorted_agents = sorted(normalized_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Create a progress bar for each agent showing their relative standing
+        for name, score in sorted_agents:
+            # Display color-coded progress bars (green for leading, orange for others)
+            if name == sorted_agents[0][0]:  # Leading agent
+                col2.markdown(f"**{name}** - Leading")
+                col2.progress(score, "rgb(0, 200, 0)")
+            else:
+                col2.markdown(f"**{name}**")
+                col2.progress(score, "rgb(255, 165, 0)")
+    else:
+        col2.info("Debate has just started. Standings will appear after the first round.")
+
+    st.markdown("---")
+
     # Inject evidence box
     new_evidence = st.text_area("Inject new evidence (shared with all agents):", height=100)
     if st.button("Submit Evidence") and new_evidence:
