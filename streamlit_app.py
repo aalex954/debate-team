@@ -139,7 +139,7 @@ if "orch" in st.session_state:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(orch.next_round(st.session_state.topic))
-            st.experimental_rerun()  # Force UI update
+            st.rerun()  # Changed from experimental_rerun to rerun
         except Exception as e:
             st.error(f"Error advancing round: {e}")
     if col2.button("Stop Debate"):
