@@ -136,14 +136,28 @@ if "orch" in st.session_state:
     col1, col2 = st.columns(2)
     if col1.button("Advance Round") and not orch.config.auto and not orch.stopped:
         try:
+            # Create and set the event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            
+            # Run the next round and wait for it to complete
             loop.run_until_complete(orch.next_round(st.session_state.topic))
-            st.rerun()  # Changed from experimental_rerun to rerun
+            
+            # Close the loop properly
+            loop.close()
+            
+            # Force update the session state with the modified orchestrator
+            # This ensures changes persist after rerun
+            st.session_state.orch = orch
+            
+            # Now rerun the app to reflect changes
+            st.rerun()
         except Exception as e:
             st.error(f"Error advancing round: {e}")
     if col2.button("Stop Debate"):
         orch.stopped = True
+        # Ensure the stopped state persists
+        st.session_state.orch = orch
 
     st.write("\n---\n")
     st.write(f"**Phase:** {orch.phase} • **Round:** {orch.round_num}")
