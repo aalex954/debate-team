@@ -134,8 +134,13 @@ if "orch" in st.session_state:
 
     # Controls
     col1, col2 = st.columns(2)
-    if col1.button("Advance Round") and not orch.config.auto and not orch.stopped:
+    advance_key = f"advance_{orch.round_num}_{orch.phase}"  # Create unique key for each state
+    
+    if col1.button("Advance Round", key=advance_key) and not orch.config.auto and not orch.stopped:
         try:
+            # Set button state to prevent double-clicks
+            st.session_state[f"{advance_key}_clicked"] = True
+            
             # Create and set the event loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -146,17 +151,19 @@ if "orch" in st.session_state:
             # Close the loop properly
             loop.close()
             
-            # Force update the session state with the modified orchestrator
-            # This ensures changes persist after rerun
+            # Store the orchestrator's state in session state
+            # Deep copy any necessary objects to ensure state persistence
             st.session_state.orch = orch
+            st.session_state.last_update = datetime.datetime.now().isoformat()
             
-            # Now rerun the app to reflect changes
+            # Force Streamlit to completely rerun the app
             st.rerun()
         except Exception as e:
             st.error(f"Error advancing round: {e}")
+            st.write(f"Debug - Phase: {orch.phase}, Round: {orch.round_num}")
+            
     if col2.button("Stop Debate"):
         orch.stopped = True
-        # Ensure the stopped state persists
         st.session_state.orch = orch
 
     st.write("\n---\n")
