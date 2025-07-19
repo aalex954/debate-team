@@ -3,7 +3,7 @@ import streamlit as st
 from orchestrator import DebateConfig, DebateOrchestrator
 from storage import save_session, load_session
 
-st.set_page_config(page_title="Scholarly Agent Debate", layout="wide")
+st.set_page_config(page_title="Multi Agentic System Debate", layout="wide")
 
 # ------------- Sidebar settings ----------------
 # Replace the header with an expander
@@ -149,12 +149,10 @@ if uploaded and st.sidebar.button("Load Selected File"):
             st.sidebar.error(f"Error loading session: {e}")
             st.sidebar.write(f"Error details: {type(e).__name__}: {str(e)}")
 
-# ------------- Main UI ----------------
-st.title("📚 Scholarly Agent Debate")
+# Add this function before it's used in the UI controls section
 
-user_topic = st.text_input("Enter a topic or question:")
-
-if st.button("Start Debate") and user_topic:
+def start_debate(topic):
+    """Initialize a new debate with the given topic."""
     # Build config from sidebar widgets
     cfgs = []
     for i in range(a_num):
@@ -164,22 +162,172 @@ if st.button("Start Debate") and user_topic:
             "model": st.session_state[f"model{i}"],
         })
     judge_cfg = {"name": "Judge", "provider_name": "openai", "model": judge_model}
+    
+    # Get auto-advance setting
+    auto_run = st.session_state.get("auto_advance", False)
+    
+    # Create debate config and orchestrator
     conf = DebateConfig(cfgs, judge_cfg, auto_run)
     st.session_state.orch = DebateOrchestrator(conf)
-    st.session_state.topic = user_topic
+    st.session_state.topic = topic
     
-    # Use asyncio.run() instead of create_task
-    import nest_asyncio
-    nest_asyncio.apply()
-    
-    # Run in a way that's compatible with Streamlit
+    # Run the first round asynchronously
     try:
-        # For first round only
+        # Create and set the event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(st.session_state.orch.next_round(user_topic))
+        
+        # Run the first round and wait for it to complete
+        loop.run_until_complete(st.session_state.orch.next_round(topic))
+        
+        # Close the loop properly
+        loop.close()
+        
+        # Set timestamp for last update
+        st.session_state.last_update = datetime.datetime.now().isoformat()
+        
+        # Rerun to refresh UI
+        st.rerun()
     except Exception as e:
         st.error(f"Error starting debate: {e}")
+
+# Replace the existing UI control section with this consolidated implementation
+
+# ------------- Main UI ----------------
+st.title("📚 Multi Agentic System Debate")
+
+# Create consistent layout for topic and controls
+topic_col, button_col, toggle_col = st.columns([5, 2, 2])
+
+# Topic input/display (always in the same position)
+with topic_col:
+    if "topic" in st.session_state and "orch" in st.session_state:
+        st.markdown(f"**Topic:** {st.session_state.topic}")
+    else:
+        user_topic = st.text_input("Enter a topic or question:", key="topic_input")
+        if user_topic:
+            st.session_state.topic = user_topic
+
+# Determine app state
+debate_in_progress = "orch" in st.session_state
+is_auto_mode = debate_in_progress and st.session_state.orch.config.auto if debate_in_progress else False
+is_stopped = debate_in_progress and st.session_state.orch.stopped if debate_in_progress else False
+
+# Auto-advance toggle (always in the same position)
+with toggle_col:
+    # In non-debate state, show disabled toggle
+    if not debate_in_progress:
+        st.toggle("Auto-advance", value=False, disabled=True, key="auto_toggle_init")
+    else:
+        # Initialize auto_advance in session state if needed
+        if "auto_advance" not in st.session_state:
+            st.session_state.auto_advance = st.session_state.orch.config.auto
+        
+        # Create toggle with appropriate styling
+        auto_toggle = st.toggle(
+            "Auto-advance", 
+            value=st.session_state.auto_advance,
+            key="auto_advance_toggle",
+            disabled=is_stopped
+        )
+        
+        # Handle toggle change
+        if auto_toggle != st.session_state.orch.config.auto:
+            st.session_state.orch.config.auto = auto_toggle
+            st.session_state.auto_advance = auto_toggle
+            st.rerun()
+
+# Main action button (always in the same position)
+with button_col:
+    if not debate_in_progress:
+        # Start debate button
+        start_disabled = not st.session_state.get("topic", "")
+        if st.button("Start Debate", type="primary", disabled=start_disabled, key="main_action"):
+            start_debate(st.session_state.topic)
+    else:
+        if not is_stopped:
+            # Stop debate button
+            if st.button("Stop Debate", type="secondary", key="main_action"):
+                st.session_state.orch.stopped = True
+                st.session_state.orch.config.auto = False
+                st.session_state.auto_advance = False
+                st.rerun()
+        else:
+            # New debate button
+            if st.button("New Debate", type="primary", key="main_action"):
+                # Clear the orchestrator to start fresh
+                if "orch" in st.session_state:
+                    del st.session_state.orch
+                if "topic" in st.session_state:
+                    del st.session_state.topic
+                if "auto_advance" in st.session_state:
+                    del st.session_state.auto_advance
+                st.rerun()
+
+# Advance Round button (only appears in manual mode, but in consistent position)
+advance_col = st.container()
+with advance_col:
+    if debate_in_progress and not is_auto_mode and not is_stopped:
+        orch = st.session_state.orch
+        advance_key = f"advance_{orch.round_num}_{orch.phase}"
+        if st.button("Advance Round", key=advance_key, type="primary"):
+            try:
+                # Create and set the event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the next round and wait for it to complete
+                loop.run_until_complete(orch.next_round(st.session_state.topic))
+                
+                # Close the loop properly
+                loop.close()
+                
+                # Store the orchestrator's state in session state
+                st.session_state.orch = orch
+                st.session_state.last_update = datetime.datetime.now().isoformat()
+                
+                # Force Streamlit to completely rerun the app
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error advancing round: {e}")
+    else:
+        # Empty placeholder to maintain layout
+        st.markdown("&nbsp;", unsafe_allow_html=True)
+
+# Process auto-advance if enabled
+if debate_in_progress and is_auto_mode and not is_stopped:
+    orch = st.session_state.orch
+    
+    # Create a placeholder for auto-advance status
+    auto_status = st.empty()
+    auto_status.info("Auto-advancing rounds...")
+    
+    try:
+        # Create and set the event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Run the next round
+        loop.run_until_complete(orch.next_round(st.session_state.topic))
+        
+        # Close the loop properly
+        loop.close()
+        
+        # Update session state
+        st.session_state.orch = orch
+        st.session_state.last_update = datetime.datetime.now().isoformat()
+        
+        # Add a short delay to prevent UI flashing too quickly
+        time.sleep(1)
+        
+        # Rerun to continue auto-advancing
+        st.rerun()
+    except Exception as e:
+        st.error(f"Auto-advance error: {e}")
+        # Turn off auto but don't stop the debate
+        orch.config.auto = False
+        st.session_state.auto_advance = False
+        st.session_state.orch = orch
 
 # Async poll helper
 async def poll_loop():
