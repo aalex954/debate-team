@@ -429,8 +429,8 @@ if "orch" in st.session_state:
     agent_colors = get_agent_colors(len(orch.agents))
     judge_color = "rgb(200, 200, 220)"  # Light blue-gray for judge
     
-    # Create tabs for different views
-    timeline_tab, current_tab, full_tab = st.tabs(["Timeline", "Current Round", "Full Transcript"])
+    # Create tabs for different views - add the Outcomes tab
+    timeline_tab, current_tab, full_tab, outcomes_tab = st.tabs(["Timeline", "Current Round", "Full Transcript", "Outcomes"])
     
     with timeline_tab:
         st.subheader("Debate Flow")
@@ -522,29 +522,161 @@ if "orch" in st.session_state:
                     st.markdown("---")
                     st.markdown("### Round Summary")
                     
-                    # Display the agreement status
-                    if isinstance(verdict, dict):
-                        agreement = verdict.get("agreement", False)
-                        st.markdown(f"""
-                        <div style="
-                            background-color: {'#e6f7e6' if agreement else '#f7f7e6'}; 
-                            border-left: 4px solid {'#5cb85c' if agreement else '#f0ad4e'};
-                            border-radius: 4px;
-                            padding: 12px;
-                            margin: 10px 0;">
-                            <div style="font-weight: bold;">
-                                {'✓ Agreement Reached' if agreement else '⟳ Debate Continues'}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    # Show condensed verdict
-                    with st.expander("Judge's Verdict"):
+                    # Create themed container for the summary
+                    summary_container = st.container()
+                    with summary_container:
+                        # Display the agreement status with theme-appropriate styling
                         if isinstance(verdict, dict):
-                            if "explanation" in verdict:
-                                st.markdown(f"**Reasoning**: {verdict['explanation']}")
+                            agreement = verdict.get("agreement", False)
                             
-                            # Display any scores present in the verdict
+                            # Get leading agent info
+                            leading_agent = None
+                            leading_score = 0
+                            
+                            # Determine score type based on debate type
+                            score_type = "correctness_scores" if st.session_state.get("debate_type", "non-binary") == "binary" else "exploration_scores"
+                            fallback_types = ["agent_scores", "scores"]
+                            
+                            # Try to get scores using the appropriate types
+                            scores = verdict.get(score_type, {})
+                            if not scores:
+                                for fallback in fallback_types:
+                                    scores = verdict.get(fallback, {})
+                                    if scores:
+                                        break
+                            
+                            # Find the leading agent
+                            if scores:
+                                for agent_name, score in scores.items():
+                                    if float(score) > leading_score:
+                                        leading_score = float(score)
+                                        leading_agent = agent_name
+                            
+                            # Summary header with agreement status
+                            status_icon = "✓" if agreement else "⟳"
+                            status_text = "Agreement Reached" if agreement else "Debate Continues"
+                            
+                            st.markdown(f"""
+                            <div style="
+                                padding: 12px;
+                                border-radius: 4px;
+                                margin: 10px 0;
+                                border-left: 4px solid var(--primary-color);">
+                                <div style="font-weight: bold;">
+                                    {status_icon} {status_text}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Show judge's explanation
+                            if "explanation" in verdict:
+                                st.markdown("#### Judge's Assessment")
+                                st.markdown(verdict["explanation"])
+                            
+                            # Show agent summaries
+                            st.markdown("#### Agent Summaries")
+                            
+                            # Create columns for agent summaries
+                            agent_cols = st.columns(min(3, len(orch.agents)))
+                            
+                            # Display each agent's key points
+                            for i, agent in enumerate(orch.agents):
+                                col_idx = i % len(agent_cols)
+                                with agent_cols[col_idx]:
+                                    # Find this agent's response for this round
+                                    agent_idx = next((idx for idx, ag in enumerate(orch.agents) 
+                                                     if ag.name == agent.name), 0)
+                                    color = agent_colors[agent_idx]
+                                    
+                                    # Check if this is the leading agent
+                                    is_leader = agent.name == leading_agent
+                                    leader_badge = "🏆 " if is_leader else ""
+                                    
+                                    # Get agent's score
+                                    agent_score = scores.get(agent.name, 0) if scores else 0
+                                    
+                                    # Header with agent name and score
+                                    st.markdown(f"""
+                                    <div style="
+                                        background-color: rgba(var(--primary-color-rgb), 0.1);
+                                        border-left: 4px solid {color};
+                                        border-radius: 4px;
+                                        padding: 8px;
+                                        margin-bottom: 8px;">
+                                        <span style="font-weight: bold; color: {color};">
+                                            {leader_badge}{agent.name}
+                                        </span>
+                                        <span style="float: right; opacity: 0.8;">
+                                            Score: {float(agent_score):.2f}
+                                        </span>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Find matching transcript entries for this round
+                                    position_entry = next((t for t in agent.transcript 
+                                                      if t["round"] == "position" and 
+                                                         t.get("round_num", 0) == round_idx), None)
+                                    
+                                    # Extract main points (first sentence of each paragraph or first 2 sentences)
+                                    if position_entry:
+                                        content = position_entry["content"]
+                                        
+                                        # Extract key points - first sentence of each paragraph or first couple sentences
+                                        paragraphs = content.split('\n\n')
+                                        key_points = []
+                                        
+                                        for para in paragraphs[:3]:  # Limit to first 3 paragraphs
+                                            if '.' in para[:100]:
+                                                first_sentence = para.split('.', 1)[0].strip() + '.'
+                                                if len(first_sentence) > 10:  # Only add substantial sentences
+                                                    key_points.append(first_sentence)
+                                        
+                                        # If we didn't get good points, use first 2 sentences of whole text
+                                        if not key_points and '.' in content:
+                                            sentences = content.split('.')
+                                            key_points = [s.strip() + '.' for s in sentences[:2] if len(s.strip()) > 10]
+                                        
+                                        # Display the key points
+                                        for point in key_points:
+                                            st.markdown(f"• {point}")
+                                    else:
+                                        st.markdown("*No position statement available*")
+                            
+                            # Show verdict summary
+                            if "key_facts" in verdict or "key_insights" in verdict:
+                                st.markdown("#### Key Takeaways")
+                                
+                                if "key_facts" in verdict:
+                                    for fact in verdict["key_facts"]:
+                                        st.markdown(f"• {fact}")
+                                
+                                if "key_insights" in verdict:
+                                    for insight in verdict["key_insights"]:
+                                        st.markdown(f"💡 {insight}")
+                            
+                            # Show winner prediction
+                            if leading_agent:
+                                winner_type = "Most Factually Correct" if st.session_state.get("debate_type", "non-binary") == "binary" else "Most Insightful Contributor"
+                                st.markdown(f"""
+                                <div style="
+                                    background-color: rgba(var(--success-color-rgb), 0.1);
+                                    border-left: 4px solid var(--success-color);
+                                    border-radius: 4px;
+                                    padding: 12px;
+                                    margin: 15px 0;">
+                                    <div style="font-weight: bold;">
+                                        🏆 {winner_type}: {leading_agent}
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        else:
+                            # Fallback for non-dict verdicts
+                            st.info("Basic verdict: " + str(verdict))
+                    
+                    # Keep the detailed verdict in an expander
+                    with st.expander("Detailed Judge's Verdict"):
+                        if isinstance(verdict, dict):
+                            # Display all scores present in the verdict
                             for score_type in ["correctness_scores", "exploration_scores", "agent_scores"]:
                                 if score_type in verdict:
                                     scores = verdict[score_type]
@@ -555,6 +687,11 @@ if "orch" in st.session_state:
                                                          if ag.name == agent_name), 0)
                                         color = agent_colors[agent_idx]
                                         st.markdown(f"- **{agent_name}**: {float(score):.2f}")
+                                        st.progress(float(score), color)
+                            
+                            # Show full JSON for developers
+                            with st.expander("Raw Verdict Data"):
+                                st.json(verdict)
                         else:
                             st.markdown(str(verdict))
         
@@ -757,229 +894,226 @@ if "orch" in st.session_state:
         st.session_state.topic = new_evidence + "\n\n" + st.session_state.topic
         st.success("Evidence added. It will be included in next round prompts.")
 
-# Add after the debate transcript section
-
-# Add debate type-specific insights section
-if "orch" in st.session_state and orch.history:
-    latest_verdict = orch.history[-1]['verdict']
-    
-    st.markdown("## Debate Outcomes")
-    
-    if st.session_state.get("debate_type") == "binary":
-        # Binary debate - show correctness scores and key facts
-        if "correctness_scores" in latest_verdict:
-            st.subheader("Correctness Assessment")
+    # Add Outcomes tab content
+    with outcomes_tab:
+        if "orch" in st.session_state and orch.history:
+            latest_verdict = orch.history[-1]['verdict']
             
-            # Show correctness scores
-            for agent_name, score in latest_verdict["correctness_scores"].items():
-                agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
-                color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
-                st.markdown(f"**{agent_name}**: {score:.2f}")
-                st.progress(float(score), color)
+            st.markdown("## Debate Outcomes")
             
-            # Show key facts
-            if "key_facts" in latest_verdict:
-                st.subheader("Established Facts")
-                for fact in latest_verdict["key_facts"]:
-                    st.markdown(f"• {fact}")
+            if st.session_state.get("debate_type") == "binary":
+                # Binary debate - show correctness scores and key facts
+                if "correctness_scores" in latest_verdict:
+                    st.subheader("Correctness Assessment")
                     
-            # Show most correct agent
-            if "most_correct_agent" in latest_verdict:
-                st.success(f"**Most Factually Correct**: {latest_verdict['most_correct_agent']}")
-    else:
-        # Non-binary debate - show exploration scores and insights
-        if "exploration_scores" in latest_verdict:
-            st.subheader("Exploration Quality")
-            
-            # Show exploration scores
-            for agent_name, score in latest_verdict["exploration_scores"].items():
-                agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
-                color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
-                st.markdown(f"**{agent_name}**: {score:.2f}")
-                st.progress(float(score), color)
-            
-            # Show key insights
-            if "key_insights" in latest_verdict:
-                st.subheader("Key Insights")
-                for insight in latest_verdict["key_insights"]:
-                    st.markdown(f"💡 {insight}")
+                    # Show correctness scores
+                    for agent_name, score in latest_verdict["correctness_scores"].items():
+                        agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+                        color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
+                        st.markdown(f"**{agent_name}**: {score:.2f}")
+                        st.progress(float(score), color)
                     
-            # Show novel connections
-            if "novel_connections" in latest_verdict:
-                st.subheader("Novel Connections")
-                for connection in latest_verdict["novel_connections"]:
-                    st.markdown(f"🔗 {connection}")
+                    # Show key facts
+                    if "key_facts" in latest_verdict:
+                        st.subheader("Established Facts")
+                        for fact in latest_verdict["key_facts"]:
+                            st.markdown(f"• {fact}")
+                            
+                    # Show most correct agent
+                    if "most_correct_agent" in latest_verdict:
+                        st.success(f"**Most Factually Correct**: {latest_verdict['most_correct_agent']}")
+            else:
+                # Non-binary debate - show exploration scores and insights
+                if "exploration_scores" in latest_verdict:
+                    st.subheader("Exploration Quality")
                     
-            # Show most insightful agent
-            if "most_insightful_agent" in latest_verdict:
-                st.success(f"**Most Insightful Contributor**: {latest_verdict['most_insightful_agent']}")
-
-# Add export insights feature for non-binary debates
-if "orch" in st.session_state and st.session_state.get("debate_type") == "non-binary" and orch.history:
-    latest_verdict = orch.history[-1]['verdict']
-    if "key_insights" in latest_verdict or "novel_connections" in latest_verdict:
-        st.markdown("---")
-        st.subheader("Export Insights")
-        
-        export_format = st.selectbox("Format", ["Markdown", "Plain Text", "CSV"])
-        
-        if st.button("Export Insights"):
-            if export_format == "Markdown":
-                insights_md = f"# Insights from Debate: {st.session_state.topic}\n\n"
-                insights_md += "## Key Insights\n\n"
-                for insight in latest_verdict.get("key_insights", []):
-                    insights_md += f"- {insight}\n"
-                insights_md += "\n## Novel Connections\n\n"
-                for connection in latest_verdict.get("novel_connections", []):
-                    insights_md += f"- {connection}\n"
-                
-                st.download_button(
-                    label="Download Markdown",
-                    data=insights_md,
-                    file_name="debate_insights.md",
-                    mime="text/markdown",
-                )
-            elif export_format == "CSV":
-                import csv
-                from io import StringIO
-                
-                output = StringIO()
-                writer = csv.writer(output)
-                writer.writerow(["Type", "Content"])
-                
-                for insight in latest_verdict.get("key_insights", []):
-                    writer.writerow(["Key Insight", insight])
-                for connection in latest_verdict.get("novel_connections", []):
-                    writer.writerow(["Novel Connection", connection])
-                
-                st.download_button(
-                    label="Download CSV",
-                    data=output.getvalue(),
-                    file_name="debate_insights.csv",
-                    mime="text/csv",
-                )
-            else:  # Plain Text
-                insights_txt = f"INSIGHTS FROM DEBATE: {st.session_state.topic}\n\n"
-                insights_txt += "KEY INSIGHTS:\n\n"
-                for insight in latest_verdict.get("key_insights", []):
-                    insights_txt += f"* {insight}\n"
-                insights_txt += "\nNOVEL CONNECTIONS:\n\n"
-                for connection in latest_verdict.get("novel_connections", []):
-                    insights_txt += f"* {connection}\n"
-                
-                st.download_button(
-                    label="Download Text",
-                    data=insights_txt,
-                    file_name="debate_insights.txt",
-                    mime="text/plain",
-                )
-
-# Add this after the Round Counter and Winning Indicator section
-
-# Add judge verdict visualization
-if "orch" in st.session_state and orch.history and len(orch.history) > 0:
-    st.markdown("## Judge Verdict Evolution")
-    
-    # Process verdict history into a format suitable for charting
-    verdict_data = {}
-    rounds = []
-    
-    # Determine score type based on debate type
-    score_type = "correctness_scores" if st.session_state.get("debate_type") == "binary" else "exploration_scores"
-    fallback_score_types = ["agent_scores", "scores"]
-    
-    # Initialize agent data series
-    for agent in orch.agents:
-        verdict_data[agent.name] = []
-    
-    # Extract scores from each round's verdict
-    for item in orch.history:
-        round_num = item['round']
-        rounds.append(f"R{round_num}")
-        verdict = item['verdict']
-        
-        if isinstance(verdict, dict):
-            # Try to get scores using the primary score type
-            scores = verdict.get(score_type, {})
-            
-            # If not found, try fallback score types
-            if not scores:
-                for fallback_type in fallback_score_types:
-                    scores = verdict.get(fallback_type, {})
-                    if scores:
-                        break
-            
-            # If still no scores but there's a "most_correct_agent" or "most_insightful_agent"
-            if not scores:
-                top_agent_key = "most_correct_agent" if st.session_state.get("debate_type") == "binary" else "most_insightful_agent"
-                top_agent = verdict.get(top_agent_key, None)
-                
-                # Assign a high score to the top agent if specified
-                if top_agent:
-                    scores = {agent_name: 1.0 if agent_name == top_agent else 0.5 for agent_name in verdict_data.keys()}
-            
-            # Extract sentiment scores from explanation as a last resort
-            if not scores and "explanation" in verdict:
-                explanation = verdict["explanation"].lower()
-                sentiment_scores = {}
-                
-                for agent_name in verdict_data.keys():
-                    name_lower = agent_name.lower()
-                    score = 0.5  # Default neutral score
+                    # Show exploration scores
+                    for agent_name, score in latest_verdict["exploration_scores"].items():
+                        agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+                        color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
+                        st.markdown(f"**{agent_name}**: {score:.2f}")
+                        st.progress(float(score), color)
                     
-                    if name_lower in explanation:
-                        # Find nearby sentiment words
-                        positive_words = ['strong', 'compelling', 'convincing', 'valid', 'sound', 'good', 'excellent']
-                        negative_words = ['weak', 'flawed', 'incorrect', 'inconsistent', 'problematic']
+                    # Show key insights
+                    if "key_insights" in latest_verdict:
+                        st.subheader("Key Insights")
+                        for insight in latest_verdict["key_insights"]:
+                            st.markdown(f"💡 {insight}")
+                            
+                    # Show novel connections
+                    if "novel_connections" in latest_verdict:
+                        st.subheader("Novel Connections")
+                        for connection in latest_verdict["novel_connections"]:
+                            st.markdown(f"🔗 {connection}")
+                            
+                    # Show most insightful agent
+                    if "most_insightful_agent" in latest_verdict:
+                        st.success(f"**Most Insightful Contributor**: {latest_verdict['most_insightful_agent']}")
+
+            # Add export insights feature for non-binary debates
+            if st.session_state.get("debate_type") == "non-binary" and "key_insights" in latest_verdict or "novel_connections" in latest_verdict:
+                st.markdown("---")
+                st.subheader("Export Insights")
+                
+                export_format = st.selectbox("Format", ["Markdown", "Plain Text", "CSV"])
+                
+                if st.button("Export Insights"):
+                    if export_format == "Markdown":
+                        insights_md = f"# Insights from Debate: {st.session_state.topic}\n\n"
+                        insights_md += "## Key Insights\n\n"
+                        for insight in latest_verdict.get("key_insights", []):
+                            insights_md += f"- {insight}\n"
+                        insights_md += "\n## Novel Connections\n\n"
+                        for connection in latest_verdict.get("novel_connections", []):
+                            insights_md += f"- {connection}\n"
                         
-                        for word in positive_words:
-                            if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
-                                score += 0.1
+                        st.download_button(
+                            label="Download Markdown",
+                            data=insights_md,
+                            file_name="debate_insights.md",
+                            mime="text/markdown",
+                        )
+                    elif export_format == "CSV":
+                        import csv
+                        from io import StringIO
                         
-                        for word in negative_words:
-                            if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
-                                score -= 0.1
-                    
-                    sentiment_scores[agent_name] = max(0, min(1, score))  # Clamp between 0 and 1
+                        output = StringIO()
+                        writer = csv.writer(output)
+                        writer.writerow(["Type", "Content"])
+                        
+                        for insight in latest_verdict.get("key_insights", []):
+                            writer.writerow(["Key Insight", insight])
+                        for connection in latest_verdict.get("novel_connections", []):
+                            writer.writerow(["Novel Connection", connection])
+                        
+                        st.download_button(
+                            label="Download CSV",
+                            data=output.getvalue(),
+                            file_name="debate_insights.csv",
+                            mime="text/csv",
+                        )
+                    else:  # Plain Text
+                        insights_txt = f"INSIGHTS FROM DEBATE: {st.session_state.topic}\n\n"
+                        insights_txt += "KEY INSIGHTS:\n\n"
+                        for insight in latest_verdict.get("key_insights", []):
+                            insights_txt += f"* {insight}\n"
+                        insights_txt += "\nNOVEL CONNECTIONS:\n\n"
+                        for connection in latest_verdict.get("novel_connections", []):
+                            insights_txt += f"* {connection}\n"
+                        
+                        st.download_button(
+                            label="Download Text",
+                            data=insights_txt,
+                            file_name="debate_insights.txt",
+                            mime="text/plain",
+                        )
+
+            # Add judge verdict visualization
+            if len(orch.history) > 0:
+                st.markdown("## Judge Verdict Evolution")
                 
-                scores = sentiment_scores
-        
-            # Assign scores to each agent (default to previous score or 0.5 if not mentioned)
-            for agent_name in verdict_data.keys():
-                if agent_name in scores:
-                    verdict_data[agent_name].append(float(scores[agent_name]))
-                elif verdict_data[agent_name]:
-                    # Carry forward previous score if available
-                    verdict_data[agent_name].append(verdict_data[agent_name][-1])
-                else:
-                    # Default score for first appearance
-                    verdict_data[agent_name].append(0.5)
+                # Process verdict history into a format suitable for charting
+                verdict_data = {}
+                rounds = []
+                
+                # Determine score type based on debate type
+                score_type = "correctness_scores" if st.session_state.get("debate_type") == "binary" else "exploration_scores"
+                fallback_score_types = ["agent_scores", "scores"]
+                
+                # Initialize agent data series
+                for agent in orch.agents:
+                    verdict_data[agent.name] = []
+                
+                # Extract scores from each round's verdict
+                for item in orch.history:
+                    round_num = item['round']
+                    rounds.append(f"R{round_num}")
+                    verdict = item['verdict']
+                    
+                    if isinstance(verdict, dict):
+                        # Try to get scores using the primary score type
+                        scores = verdict.get(score_type, {})
+                        
+                        # If not found, try fallback score types
+                        if not scores:
+                            for fallback_type in fallback_score_types:
+                                scores = verdict.get(fallback_type, {})
+                                if scores:
+                                    break
+                        
+                        # If still no scores but there's a "most_correct_agent" or "most_insightful_agent"
+                        if not scores:
+                            top_agent_key = "most_correct_agent" if st.session_state.get("debate_type") == "binary" else "most_insightful_agent"
+                            top_agent = verdict.get(top_agent_key, None)
+                            
+                            # Assign a high score to the top agent if specified
+                            if top_agent:
+                                scores = {agent_name: 1.0 if agent_name == top_agent else 0.5 for agent_name in verdict_data.keys()}
+                        
+                        # Extract sentiment scores from explanation as a last resort
+                        if not scores and "explanation" in verdict:
+                            explanation = verdict["explanation"].lower()
+                            sentiment_scores = {}
+                            
+                            for agent_name in verdict_data.keys():
+                                name_lower = agent_name.lower()
+                                score = 0.5  # Default neutral score
+                                
+                                if name_lower in explanation:
+                                    # Find nearby sentiment words
+                                    positive_words = ['strong', 'compelling', 'convincing', 'valid', 'sound', 'good', 'excellent']
+                                    negative_words = ['weak', 'flawed', 'incorrect', 'inconsistent', 'problematic']
+                                    
+                                    for word in positive_words:
+                                        if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
+                                            score += 0.1
+                                    
+                                    for word in negative_words:
+                                        if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
+                                            score -= 0.1
+                                
+                                sentiment_scores[agent_name] = max(0, min(1, score))  # Clamp between 0 and 1
+                            
+                            scores = sentiment_scores
+                    
+                        # Assign scores to each agent (default to previous score or 0.5 if not mentioned)
+                        for agent_name in verdict_data.keys():
+                            if agent_name in scores:
+                                verdict_data[agent_name].append(float(scores[agent_name]))
+                            elif verdict_data[agent_name]:
+                                # Carry forward previous score if available
+                                verdict_data[agent_name].append(verdict_data[agent_name][-1])
+                            else:
+                                # Default score for first appearance
+                                verdict_data[agent_name].append(0.5)
+                    else:
+                        # Default scores if verdict is not in expected format
+                        for agent_name in verdict_data.keys():
+                            verdict_data[agent_name].append(0.5)
+                
+                # Create a DataFrame for charting
+                import pandas as pd
+                df = pd.DataFrame(verdict_data, index=rounds)
+                
+                # Create line chart with custom styling
+                st.line_chart(df)
+                
+                # Add chart explanation
+                debate_measure = "correctness" if st.session_state.get("debate_type") == "binary" else "insight quality"
+                st.caption(f"This chart shows how the judge's assessment of each agent's {debate_measure} evolves over debate rounds.")
+                
+                # Show final ranking if debate has multiple rounds
+                if len(rounds) > 1:
+                    st.subheader("Current Rankings")
+                    # Get latest scores
+                    final_scores = {agent: scores[-1] for agent, scores in verdict_data.items()}
+                    sorted_agents = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+                    
+                    # Display rankings with medals
+                    for rank, (agent_name, score) in enumerate(sorted_agents):
+                        medal = "🥇" if rank == 0 else "🥈" if rank == 1 else "🥉" if rank == 2 else f"{rank+1}."
+                        agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+                        color = agent_colors[agent_idx]
+                        st.markdown(f"{medal} **{agent_name}** ({score:.2f})", unsafe_allow_html=True)
         else:
-            # Default scores if verdict is not in expected format
-            for agent_name in verdict_data.keys():
-                verdict_data[agent_name].append(0.5)
-    
-    # Create a DataFrame for charting
-    import pandas as pd
-    df = pd.DataFrame(verdict_data, index=rounds)
-    
-    # Create line chart with custom styling
-    st.line_chart(df)
-    
-    # Add chart explanation
-    debate_measure = "correctness" if st.session_state.get("debate_type") == "binary" else "insight quality"
-    st.caption(f"This chart shows how the judge's assessment of each agent's {debate_measure} evolves over debate rounds.")
-    
-    # Show final ranking if debate has multiple rounds
-    if len(rounds) > 1:
-        st.subheader("Current Rankings")
-        # Get latest scores
-        final_scores = {agent: scores[-1] for agent, scores in verdict_data.items()}
-        sorted_agents = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        # Display rankings with medals
-        for rank, (agent_name, score) in enumerate(sorted_agents):
-            medal = "🥇" if rank == 0 else "🥈" if rank == 1 else "🥉" if rank == 2 else f"{rank+1}."
-            agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
-            color = agent_colors[agent_idx]
-            st.markdown(f"{medal} **{agent_name}** ({score:.2f})", unsafe_allow_html=True)
+            st.info("Debate needs to progress before outcomes are available.")
