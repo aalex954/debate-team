@@ -173,3 +173,50 @@ class DebateOrchestrator:
                 for a in self.agents
             ]
         }
+
+# Replace the existing prompt templates with these enhanced versions
+
+# Define the debate prompt templates
+POSITION_PROMPT = """
+🔥  [POSITION ROUND — Tactical Thesis]
+You are a battle‑hardened domain expert whose reputation is on the line.
+Goal: craft the **boldest, most defensible thesis** on:
+    "{user_topic}"
+
+▪ Present a clear POSITION in ≤ 250 words — lead with the single sentence you would carve in stone.
+▪ Arm your case with 2‑4 bullet‑pointed *primary* facts or data, each tagged with an MLA citation.
+▪ Pre‑emptively flag ONE likely counter‑strike against your view and state, in one line, how you will neutralize it.
+▪ No hedging adjectives ("maybe", "perhaps") — be definitive or concede explicitly.
+▪ End with a 1‑to‑10 "Fragility Index" (how vulnerable your argument still is to refutation).
+
+———  Speak like you're standing at the podium of a championship debate ———
+""".strip()
+
+CRITIQUE_PROMPT = """
+💥  [CRITIQUE ROUND — Target & Destroy]
+Below are your opponents' latest positions.  Your task: **exploit every weakness**.
+{joined}
+
+For EACH opponent, deliver:
+1. **Bullseye Summary** – Rephrase their core claim in ≤ 20 words.
+2. **Critical Hit List** – Up to 3 numbered attacks that expose logical fallacies, stale data, or citation errors.
+   • Quote or paraphrase the exact line you're striking.
+   • Justify the strike with counter‑evidence (MLA‑cite) or logic.
+3. **Damage Assessment** – Rate how badly the hit weakens their case on a 0‑10 scale.
+
+Write in compact battle‑dispatch style: no pleasantries, no filler.  Prioritize precision and lethal accuracy.
+""".strip()
+
+DEFENSE_PROMPT = """
+🛡️  [DEFENSE ROUND — Counter‑Punch]
+The following critiques were leveled at you:
+{critiques}
+
+For EACH critique aimed at your own position:
+▪ **Concede or Counter** – Either concede in ≤ 10 words *or* launch a rebuttal in ≤ 100 words.
+▪ If countering, supply *one* fresh piece of evidence or reasoning (MLA‑cite) not used before.
+▪ Update your Fragility Index (± only if justified) and explain the change in one sentence.
+
+Close with a 2‑sentence *victory path*: what remaining proof would definitively settle the issue in your favor?
+Keep the tone sharp, confident, and ruthlessly factual — no rhetorical fluff.
+""".strip()

@@ -26,11 +26,34 @@ class Agent:
 class Judge(Agent):
     """Special agent that receives whole debate and returns verdict JSON."""
     async def verdict(self, debate_state_json: str) -> Dict[str, Any]:
-        prompt = (
-            "You are a scholarly debate judge. Given the JSON debate state below, "
-            "decide if agents have reached substantial agreement. Return JSON: "
-            "{\"agreement\":bool,\"mean_agreement\":float,\"explanation\":str}.\n\n" + debate_state_json
-        )
+        prompt = f"""
+🎓  You are the sole adjudicator of a three‑phase scholarly debate
+      (POSITION → CRITIQUE → DEFENSE).
+
+Your job:  
+1. Determine whether the agents have reached "substantial agreement"  
+   • Two positions are "in agreement" when their core theses are semantically ≥ 0.75 similar
+     **or** when one agent clearly concedes to another in DEFENSE.  
+   • Compute mean_agreement = average pairwise agreement across all agents (0‑1).  
+
+2. Audit DEFENSE compliance for **each agent** against ALL FOUR rules.  
+   • **Concede‑or‑Counter rule** — Exactly one of: a ≤ 10‑word concession **or** a ≤ 100‑word rebuttal.  
+   • **One fresh citation** — At most ONE new MLA citation appears.  
+   • **Updated Fragility Index** — Index is present, changed only when justified, and the change is explained in ≤ 1 sentence.  
+   • **Roadmap to definitive proof** — Concludes with *exactly* 2 sentences describing decisive future evidence.  
+
+   For any violation, subtract 0.10 from that agent's agreement score (but do not go below 0).  
+
+3. Return a JSON object with **exactly** these keys:  
+   {{
+     "agreement": <bool ‑‑ True if mean_agreement ≥ 0.75 *after* any penalties>,  
+     "mean_agreement": <float 0‑1 rounded to 2 dp>,  
+     "explanation": "<concise reasoning (≤ 75 words) explaining the decision>"
+   }}
+
+DEBATE_STATE_JSON:
+{debate_state_json}
+"""
         raw = await self.provider.complete(prompt)
         try:
             match = re.search(r"\{.*\}", raw, re.S)
