@@ -46,14 +46,24 @@ class DebateOrchestrator:
     def __init__(self, config: DebateConfig):
         self.config = config
         
+        # Store agent stances in a separate dictionary for easy lookup
+        self.agent_stances = {}
+        
         # Filter out extra parameters not accepted by Agent constructor
         self.agents: List[Agent] = []
         for cfg in config.agents_cfg:
             # Create a copy of the config without stance
             agent_cfg = {k: v for k, v in cfg.items() 
                          if k in ['name', 'provider_name', 'model']}
-            self.agents.append(Agent(**agent_cfg))
             
+            # Create the agent
+            agent = Agent(**agent_cfg)
+            self.agents.append(agent)
+            
+            # Store stance if present
+            if "stance" in cfg:
+                self.agent_stances[agent.name] = cfg["stance"]
+    
         self.judge = Judge(**config.judge_cfg)
         self.round_num = 0
         self.phase = "position"  # position, critique, defense
@@ -162,10 +172,10 @@ class DebateOrchestrator:
             return
         
         # Get debate type and opposition mode settings
-        debate_type = self.config.debate_type
-        opposition_mode = self.config.opposition_mode
+        debate_type = getattr(self.config, 'debate_type', 'non-binary')
+        opposition_mode = getattr(self.config, 'opposition_mode', False)
         
-        # Run the appropriate phase with enhanced prompts
+        # Run the appropriate phase
         if self.phase == "position":
             # Prepare position prompts for each agent based on stance
             prompts = []
@@ -173,10 +183,10 @@ class DebateOrchestrator:
                 # Determine agent's stance for opposition mode
                 stance = "neutral"
                 if opposition_mode:
-                    agent_cfg = next((cfg for cfg in self.config.agents_cfg 
-                                    if cfg["name"] == agent.name), None)
-                    if agent_cfg and "stance" in agent_cfg:
-                        stance = agent_cfg["stance"]
+                    # Get stance from our lookup dictionary
+                    stance = self.agent_stances.get(agent.name, "neutral")
+                
+                print(f"Agent {agent.name} has stance: {stance}")  # Debug print
                 
                 # Select appropriate prompt based on stance
                 if opposition_mode and stance in ["affirmative", "negative"]:
@@ -214,8 +224,22 @@ Your goal is to be persuasive while maintaining intellectual honesty.
 """
                 else:
                     # Use the standard position prompt for non-opposition or neutral agents
-                    prompt = POSITION_PROMPT.format(user_topic=topic)
-                
+                    prompt = f"""
+🔥 [POSITION ROUND — Analysis]
+You are a scholarly expert analyzing the topic:
+    "{topic}"
+
+Present a well-reasoned position based on evidence and critical thinking.
+
+▪ Present a clear position in ≤ 250 words
+▪ Support your position with 3-5 verified facts, each with an MLA citation
+▪ Consider multiple perspectives and potential counterarguments
+▪ Use precise, measured language focused on the strongest evidence
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to provide an informed, balanced analysis.
+"""
+            
                 prompts.append((agent, prompt))
             
             # Execute position round with customized prompts
@@ -241,7 +265,7 @@ Your goal is to be persuasive while maintaining intellectual honesty.
                 for j, critic in enumerate(self.agents):
                     if i != j:  # Skip self-critique
                         critiques.append(f"FROM {critic.name}:\n{critic.transcript[-1]['content']}")
-                
+            
                 # Use enhanced defense prompt
                 defense_prompt = DEFENSE_PROMPT.format(critiques="\n\n".join(critiques))
                 await agent.speak(defense_prompt, round_type="defense")
@@ -282,17 +306,14 @@ Your goal is to be persuasive while maintaining intellectual honesty.
             "round": self.round_num,
             "phase": self.phase,
             "config": {
-                "debate_type": self.config.debate_type,
-                "opposition_mode": self.config.opposition_mode
+                "debate_type": getattr(self.config, "debate_type", "non-binary"),
+                "opposition_mode": getattr(self.config, "opposition_mode", False)
             },
             "agents": [
                 {
                     "name": agent.name,
                     "transcript": agent.transcript,
-                    "stance": next((cfg.get("stance", "neutral") 
-                                   for cfg in self.config.agents_cfg 
-                                   if cfg["name"] == agent.name), "neutral")
-                    if self.config.opposition_mode else "neutral"
+                    "stance": self.agent_stances.get(agent.name, "neutral")
                 }
                 for agent in self.agents
             ]
@@ -413,10 +434,10 @@ async def next_round(self, topic: str):
         return
     
     # Get debate type and opposition mode settings
-    debate_type = self.config.debate_type
-    opposition_mode = self.config.opposition_mode
+    debate_type = getattr(self.config, 'debate_type', 'non-binary')
+    opposition_mode = getattr(self.config, 'opposition_mode', False)
     
-    # Run the appropriate phase with enhanced prompts
+    # Run the appropriate phase
     if self.phase == "position":
         # Prepare position prompts for each agent based on stance
         prompts = []
@@ -424,10 +445,10 @@ async def next_round(self, topic: str):
             # Determine agent's stance for opposition mode
             stance = "neutral"
             if opposition_mode:
-                agent_cfg = next((cfg for cfg in self.config.agents_cfg 
-                                if cfg["name"] == agent.name), None)
-                if agent_cfg and "stance" in agent_cfg:
-                    stance = agent_cfg["stance"]
+                # Get stance from our lookup dictionary
+                stance = self.agent_stances.get(agent.name, "neutral")
+                
+            print(f"Agent {agent.name} has stance: {stance}")  # Debug print
             
             # Select appropriate prompt based on stance
             if opposition_mode and stance in ["affirmative", "negative"]:
@@ -465,7 +486,21 @@ Your goal is to be persuasive while maintaining intellectual honesty.
 """
             else:
                 # Use the standard position prompt for non-opposition or neutral agents
-                prompt = POSITION_PROMPT.format(user_topic=topic)
+                prompt = f"""
+🔥 [POSITION ROUND — Analysis]
+You are a scholarly expert analyzing the topic:
+    "{topic}"
+
+Present a well-reasoned position based on evidence and critical thinking.
+
+▪ Present a clear position in ≤ 250 words
+▪ Support your position with 3-5 verified facts, each with an MLA citation
+▪ Consider multiple perspectives and potential counterarguments
+▪ Use precise, measured language focused on the strongest evidence
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to provide an informed, balanced analysis.
+"""
             
             prompts.append((agent, prompt))
         
@@ -533,17 +568,14 @@ Your goal is to be persuasive while maintaining intellectual honesty.
             "round": self.round_num,
             "phase": self.phase,
             "config": {
-                "debate_type": self.config.debate_type,
-                "opposition_mode": self.config.opposition_mode
+                "debate_type": getattr(self.config, "debate_type", "non-binary"),
+                "opposition_mode": getattr(self.config, "opposition_mode", False)
             },
             "agents": [
                 {
                     "name": agent.name,
                     "transcript": agent.transcript,
-                    "stance": next((cfg.get("stance", "neutral") 
-                                   for cfg in self.config.agents_cfg 
-                                   if cfg["name"] == agent.name), "neutral")
-                    if self.config.opposition_mode else "neutral"
+                    "stance": self.agent_stances.get(agent.name, "neutral")
                 }
                 for agent in self.agents
             ]

@@ -256,11 +256,11 @@ if not debate_in_progress and st.session_state.get("debate_type", "non-binary") 
         
         with assign_cols[0]:
             st.markdown("**Affirmative Position**")
-            # Create multi-select for affirmative agents
+            # Create multi-select for affirmative agents - include both name and index
             affirmative_agents = st.multiselect(
                 "Select agents",
-                [f"Agent {i+1}: {st.session_state[f'name{i}']}" for i in range(a_num)],
-                default=[f"Agent 1: {st.session_state['name0']}"]
+                [f"{i}:{st.session_state[f'name{i}']}" for i in range(a_num)],
+                default=[f"0:{st.session_state['name0']}"]
             )
             
         with assign_cols[1]:
@@ -274,8 +274,9 @@ if not debate_in_progress and st.session_state.get("debate_type", "non-binary") 
         
         # Store selections in session state
         st.session_state.opposition_mode = opposition_mode
-        st.session_state.affirmative_agents = [a.split(":")[0].strip()[-1] for a in affirmative_agents]
-        st.session_state.negative_agents = [a.split(":")[0].strip()[-1] for a in negative_agents]
+        # Extract agent indices correctly - parse the number after "Agent " and before ":"
+        st.session_state.affirmative_agents = [a.split(":")[0].replace("Agent ", "").strip() for a in affirmative_agents]
+        st.session_state.negative_agents = [a.split(":")[0].replace("Agent ", "").strip() for a in negative_agents]
 
 # Determine app state
 debate_in_progress = "orch" in st.session_state
