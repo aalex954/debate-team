@@ -11,10 +11,15 @@ except ImportError:
     POCKETFLOW_AVAILABLE = False
 
 class DebateConfig:
-    def __init__(self, agents_cfg: List[Dict[str,str]], judge_cfg: Dict[str,str], auto: bool):
+    def __init__(self, agents_cfg, judge_cfg, auto=False, debate_type="non-binary", 
+                 opposition_mode=False, affirmative_agents=None, negative_agents=None):
         self.agents_cfg = agents_cfg
         self.judge_cfg = judge_cfg
         self.auto = auto
+        self.debate_type = debate_type
+        self.opposition_mode = opposition_mode
+        self.affirmative_agents = affirmative_agents or []
+        self.negative_agents = negative_agents or []
 
 # Only define DebateNode if pocketflow is available
 if POCKETFLOW_AVAILABLE:
@@ -40,7 +45,15 @@ if POCKETFLOW_AVAILABLE:
 class DebateOrchestrator:
     def __init__(self, config: DebateConfig):
         self.config = config
-        self.agents: List[Agent] = [Agent(**cfg) for cfg in config.agents_cfg]
+        
+        # Filter out extra parameters not accepted by Agent constructor
+        self.agents: List[Agent] = []
+        for cfg in config.agents_cfg:
+            # Create a copy of the config without stance
+            agent_cfg = {k: v for k, v in cfg.items() 
+                         if k in ['name', 'provider_name', 'model']}
+            self.agents.append(Agent(**agent_cfg))
+            
         self.judge = Judge(**config.judge_cfg)
         self.round_num = 0
         self.phase = "position"  # position, critique, defense
@@ -174,6 +187,30 @@ class DebateOrchestrator:
             ]
         }
 
+    def get_debate_state(self):
+        """Get current debate state as JSON for the judge."""
+        # Include opposition mode in the debate state
+        state = {
+            "round": self.round_num,
+            "phase": self.phase,
+            "config": {
+                "debate_type": self.config.debate_type,
+                "opposition_mode": self.config.opposition_mode
+            },
+            "agents": [
+                {
+                    "name": agent.name,
+                    "transcript": agent.transcript,
+                    "stance": next((cfg.get("stance", "neutral") 
+                                   for cfg in self.config.agents_cfg 
+                                   if cfg["name"] == agent.name), "neutral")
+                    if self.config.opposition_mode else "neutral"
+                }
+                for agent in self.agents
+            ]
+        }
+        return json.dumps(state)
+
 # Replace the existing prompt templates with these enhanced versions
 
 # Define the debate prompt templates
@@ -220,3 +257,62 @@ For EACH critique aimed at your own position:
 Close with a 2‑sentence *victory path*: what remaining proof would definitively settle the issue in your favor?
 Keep the tone sharp, confident, and ruthlessly factual — no rhetorical fluff.
 """.strip()
+
+# Modify the position prompt to differentiate based on debate type
+
+async def next_round(self, user_topic):
+    """Run the next round of the debate"""
+    # Get debate type and opposition mode settings
+    debate_type = self.config.debate_type
+    opposition_mode = self.config.opposition_mode
+    
+    # Modify position prompt based on opposition mode
+    if self.phase == "position":
+        for i, agent in enumerate(self.agents):
+            # Get agent's assigned stance
+            stance = "neutral"
+            if opposition_mode:
+                # Look up the agent's stance from config
+                agent_cfg = next((cfg for cfg in self.config.agents_cfg if cfg["name"] == agent.name), None)
+                if agent_cfg and "stance" in agent_cfg:
+                    stance = agent_cfg["stance"]
+            
+            # Create stance-specific position prompt
+            if opposition_mode and stance in ["affirmative", "negative"]:
+                if stance == "affirmative":
+                    position_prompt = f"""
+🔥 [POSITION ROUND — Affirmative Position]
+You are an expert debater assigned to argue the AFFIRMATIVE position on:
+    "{user_topic}"
+
+Present the strongest possible case FOR this position, even if you might personally disagree.
+
+▪ Present a clear AFFIRMATIVE position in ≤ 250 words
+▪ Support your position with 3-5 verified facts, each with an MLA citation
+▪ Anticipate and preemptively address key counterarguments
+▪ Use precise, measured language focused on your strongest points
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+                else:  # negative stance
+                    position_prompt = f"""
+🔥 [POSITION ROUND — Negative Position]
+You are an expert debater assigned to argue the NEGATIVE position on:
+    "{user_topic}"
+
+Present the strongest possible case AGAINST this position, even if you might personally agree.
+
+▪ Present a clear NEGATIVE position in ≤ 250 words
+▪ Support your critique with 3-5 verified facts, each with an MLA citation
+▪ Identify and emphasize key flaws in the affirmative position
+▪ Use precise, measured language focused on the weakest points of the opposing view
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+            else:
+                # Use the standard position prompt
+                position_prompt = POSITION_PROMPT.format(user_topic=user_topic)
+            
+            # Rest of the position phase handling remains the same

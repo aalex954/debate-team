@@ -156,18 +156,37 @@ def start_debate(topic):
     # Build config from sidebar widgets
     cfgs = []
     for i in range(a_num):
-        cfgs.append({
+        agent_cfg = {
             "name": st.session_state[f"name{i}"],
             "provider_name": st.session_state[f"prov{i}"],
             "model": st.session_state[f"model{i}"],
-        })
+        }
+        
+        # Add position stance for opposition mode
+        if st.session_state.get("opposition_mode", False):
+            if str(i) in st.session_state.get("affirmative_agents", []):
+                agent_cfg["stance"] = "affirmative"
+            elif str(i) in st.session_state.get("negative_agents", []):
+                agent_cfg["stance"] = "negative"
+            else:
+                agent_cfg["stance"] = "neutral"
+        
+        cfgs.append(agent_cfg)
+    
     judge_cfg = {"name": "Judge", "provider_name": "openai", "model": judge_model}
     
-    # Get auto-advance setting
+    # Get settings from session state
     auto_run = st.session_state.get("auto_advance", False)
+    debate_type = st.session_state.get("debate_type", "non-binary")
+    opposition_mode = st.session_state.get("opposition_mode", False)
+    affirmative_agents = st.session_state.get("affirmative_agents", [])
+    negative_agents = st.session_state.get("negative_agents", [])
     
-    # Create debate config and orchestrator
-    conf = DebateConfig(cfgs, judge_cfg, auto_run)
+    # Create debate config with opposition mode settings
+    conf = DebateConfig(
+        cfgs, judge_cfg, auto_run, debate_type,
+        opposition_mode, affirmative_agents, negative_agents
+    )
     st.session_state.orch = DebateOrchestrator(conf)
     st.session_state.topic = topic
     
@@ -199,6 +218,11 @@ st.title("📚 Multi Agentic System Debate")
 # Create consistent layout for topic and controls
 topic_col, button_col, toggle_col = st.columns([5, 2, 2])
 
+# Determine app state - moved up so it's available for all UI components
+debate_in_progress = "orch" in st.session_state
+is_auto_mode = debate_in_progress and st.session_state.orch.config.auto if debate_in_progress else False
+is_stopped = debate_in_progress and st.session_state.orch.stopped if debate_in_progress else False
+
 # Topic input/display (always in the same position)
 with topic_col:
     if "topic" in st.session_state and "orch" in st.session_state:
@@ -207,6 +231,51 @@ with topic_col:
         user_topic = st.text_input("Enter a topic or question:", key="topic_input")
         if user_topic:
             st.session_state.topic = user_topic
+        
+        # Add debate type selection - only show when debate hasn't started
+        debate_type = st.radio(
+            "Debate Type:",
+            ["Non-binary (Ideation/Exploration)", "Binary (Objective Correctness)"],
+            horizontal=True,
+            help="Non-binary focuses on idea exploration. Binary focuses on factual correctness."
+        )
+        # Store selection in session state (extract just "binary" or "non-binary")
+        st.session_state.debate_type = "binary" if "Binary" in debate_type else "non-binary"
+
+# Only show opposition controls for binary debates
+if not debate_in_progress and st.session_state.get("debate_type", "non-binary") == "binary":
+    opposition_mode = st.checkbox(
+        "Enable Opposition Mode", 
+        help="Force agents to argue opposing sides of the topic"
+    )
+    
+    if opposition_mode:
+        st.markdown("##### Assign Debate Positions")
+        # Create columns for selecting affirmative/negative agents
+        assign_cols = st.columns(2)
+        
+        with assign_cols[0]:
+            st.markdown("**Affirmative Position**")
+            # Create multi-select for affirmative agents
+            affirmative_agents = st.multiselect(
+                "Select agents",
+                [f"Agent {i+1}: {st.session_state[f'name{i}']}" for i in range(a_num)],
+                default=[f"Agent 1: {st.session_state['name0']}"]
+            )
+            
+        with assign_cols[1]:
+            st.markdown("**Negative Position**")
+            # Create multi-select for negative agents
+            negative_agents = st.multiselect(
+                "Select agents",
+                [f"Agent {i+1}: {st.session_state[f'name{i}']}" for i in range(a_num)],
+                default=[f"Agent 2: {st.session_state['name1']}"]
+            )
+        
+        # Store selections in session state
+        st.session_state.opposition_mode = opposition_mode
+        st.session_state.affirmative_agents = [a.split(":")[0].strip()[-1] for a in affirmative_agents]
+        st.session_state.negative_agents = [a.split(":")[0].strip()[-1] for a in negative_agents]
 
 # Determine app state
 debate_in_progress = "orch" in st.session_state
@@ -590,3 +659,120 @@ if "orch" in st.session_state:
         # Prepend evidence to topic for next round
         st.session_state.topic = new_evidence + "\n\n" + st.session_state.topic
         st.success("Evidence added. It will be included in next round prompts.")
+
+# Add after the debate transcript section
+
+# Add debate type-specific insights section
+if "orch" in st.session_state and orch.history:
+    latest_verdict = orch.history[-1]['verdict']
+    
+    st.markdown("## Debate Outcomes")
+    
+    if st.session_state.get("debate_type") == "binary":
+        # Binary debate - show correctness scores and key facts
+        if "correctness_scores" in latest_verdict:
+            st.subheader("Correctness Assessment")
+            
+            # Show correctness scores
+            for agent_name, score in latest_verdict["correctness_scores"].items():
+                agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+                color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
+                st.markdown(f"**{agent_name}**: {score:.2f}")
+                st.progress(float(score), color)
+            
+            # Show key facts
+            if "key_facts" in latest_verdict:
+                st.subheader("Established Facts")
+                for fact in latest_verdict["key_facts"]:
+                    st.markdown(f"• {fact}")
+                    
+            # Show most correct agent
+            if "most_correct_agent" in latest_verdict:
+                st.success(f"**Most Factually Correct**: {latest_verdict['most_correct_agent']}")
+    else:
+        # Non-binary debate - show exploration scores and insights
+        if "exploration_scores" in latest_verdict:
+            st.subheader("Exploration Quality")
+            
+            # Show exploration scores
+            for agent_name, score in latest_verdict["exploration_scores"].items():
+                agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+                color = agent_colors[agent_idx] if agent_idx < len(agent_colors) else "gray"
+                st.markdown(f"**{agent_name}**: {score:.2f}")
+                st.progress(float(score), color)
+            
+            # Show key insights
+            if "key_insights" in latest_verdict:
+                st.subheader("Key Insights")
+                for insight in latest_verdict["key_insights"]:
+                    st.markdown(f"💡 {insight}")
+                    
+            # Show novel connections
+            if "novel_connections" in latest_verdict:
+                st.subheader("Novel Connections")
+                for connection in latest_verdict["novel_connections"]:
+                    st.markdown(f"🔗 {connection}")
+                    
+            # Show most insightful agent
+            if "most_insightful_agent" in latest_verdict:
+                st.success(f"**Most Insightful Contributor**: {latest_verdict['most_insightful_agent']}")
+
+# Add export insights feature for non-binary debates
+if "orch" in st.session_state and st.session_state.get("debate_type") == "non-binary" and orch.history:
+    latest_verdict = orch.history[-1]['verdict']
+    if "key_insights" in latest_verdict or "novel_connections" in latest_verdict:
+        st.markdown("---")
+        st.subheader("Export Insights")
+        
+        export_format = st.selectbox("Format", ["Markdown", "Plain Text", "CSV"])
+        
+        if st.button("Export Insights"):
+            if export_format == "Markdown":
+                insights_md = f"# Insights from Debate: {st.session_state.topic}\n\n"
+                insights_md += "## Key Insights\n\n"
+                for insight in latest_verdict.get("key_insights", []):
+                    insights_md += f"- {insight}\n"
+                insights_md += "\n## Novel Connections\n\n"
+                for connection in latest_verdict.get("novel_connections", []):
+                    insights_md += f"- {connection}\n"
+                
+                st.download_button(
+                    label="Download Markdown",
+                    data=insights_md,
+                    file_name="debate_insights.md",
+                    mime="text/markdown",
+                )
+            elif export_format == "CSV":
+                import csv
+                from io import StringIO
+                
+                output = StringIO()
+                writer = csv.writer(output)
+                writer.writerow(["Type", "Content"])
+                
+                for insight in latest_verdict.get("key_insights", []):
+                    writer.writerow(["Key Insight", insight])
+                for connection in latest_verdict.get("novel_connections", []):
+                    writer.writerow(["Novel Connection", connection])
+                
+                st.download_button(
+                    label="Download CSV",
+                    data=output.getvalue(),
+                    file_name="debate_insights.csv",
+                    mime="text/csv",
+                )
+            else:  # Plain Text
+                insights_txt = f"INSIGHTS FROM DEBATE: {st.session_state.topic}\n\n"
+                insights_txt += "KEY INSIGHTS:\n\n"
+                for insight in latest_verdict.get("key_insights", []):
+                    insights_txt += f"* {insight}\n"
+                insights_txt += "\nNOVEL CONNECTIONS:\n\n"
+                for connection in latest_verdict.get("novel_connections", []):
+                    insights_txt += f"* {connection}\n"
+                
+                st.download_button(
+                    label="Download Text",
+                    data=insights_txt,
+                    file_name="debate_insights.txt",
+                    mime="text/plain",
+                )
