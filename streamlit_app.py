@@ -1,4 +1,4 @@
-import asyncio, json, datetime, os
+import asyncio, json, datetime, os, time  # Add time module here
 import streamlit as st
 from orchestrator import DebateConfig, DebateOrchestrator
 from storage import save_session, load_session
@@ -158,31 +158,70 @@ if "orch" in st.session_state:
     col1, col2 = st.columns(2)
     advance_key = f"advance_{orch.round_num}_{orch.phase}"  # Create unique key for each state
     
-    if col1.button("Advance Round", key=advance_key) and not orch.config.auto and not orch.stopped:
-        try:
-            # Set button state to prevent double-clicks
-            st.session_state[f"{advance_key}_clicked"] = True
+    # Auto-advance functionality
+    if orch.config.auto and not orch.stopped:
+        # Check if we need to create a new task
+        if "auto_advance_task" not in st.session_state or st.session_state.get("auto_advance_status") != "running":
+            st.session_state.auto_advance_status = "running"
             
-            # Create and set the event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Create a placeholder to show auto-advance status
+            auto_status = st.empty()
+            auto_status.info("Auto-advancing rounds enabled")
             
-            # Run the next round and wait for it to complete
-            loop.run_until_complete(orch.next_round(st.session_state.topic))
-            
-            # Close the loop properly
-            loop.close()
-            
-            # Store the orchestrator's state in session state
-            # Deep copy any necessary objects to ensure state persistence
-            st.session_state.orch = orch
-            st.session_state.last_update = datetime.datetime.now().isoformat()
-            
-            # Force Streamlit to completely rerun the app
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error advancing round: {e}")
-            st.write(f"Debug - Phase: {orch.phase}, Round: {orch.round_num}")
+            # Only advance if not at the end of a round or stopped
+            if not orch.stopped:
+                try:
+                    # Create and set the event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Run the next round
+                    loop.run_until_complete(orch.next_round(st.session_state.topic))
+                    
+                    # Close the loop properly
+                    loop.close()
+                    
+                    # Update session state
+                    st.session_state.orch = orch
+                    st.session_state.last_update = datetime.datetime.now().isoformat()
+                    
+                    # Set a short delay before refreshing to avoid UI flashing
+                    time.sleep(1)
+                    
+                    # Rerun the app to show the updated state
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Auto-advance error: {e}")
+                    st.session_state.auto_advance_status = "error"
+
+    if col1.button("Advance Round", key=advance_key) and not orch.stopped:
+        # If auto is enabled, just show a message
+        if orch.config.auto:
+            st.info("Auto-advance is enabled. Rounds will progress automatically.")
+        else:
+            try:
+                # Set button state to prevent double-clicks
+                st.session_state[f"{advance_key}_clicked"] = True
+                
+                # Create and set the event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Run the next round and wait for it to complete
+                loop.run_until_complete(orch.next_round(st.session_state.topic))
+                
+                # Close the loop properly
+                loop.close()
+                
+                # Store the orchestrator's state in session state
+                st.session_state.orch = orch
+                st.session_state.last_update = datetime.datetime.now().isoformat()
+                
+                # Force Streamlit to completely rerun the app
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error advancing round: {e}")
+                st.write(f"Debug - Phase: {orch.phase}, Round: {orch.round_num}")
             
     if col2.button("Stop Debate"):
         orch.stopped = True
