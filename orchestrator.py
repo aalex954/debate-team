@@ -157,8 +157,95 @@ class DebateOrchestrator:
 
     # ------------------ Public API ------------------
     async def next_round(self, topic: str):
-        if self.stopped: return
-        await self._run_phase(topic)
+        """Run the next round of the debate"""
+        if self.stopped: 
+            return
+        
+        # Get debate type and opposition mode settings
+        debate_type = self.config.debate_type
+        opposition_mode = self.config.opposition_mode
+        
+        # Run the appropriate phase with enhanced prompts
+        if self.phase == "position":
+            # Prepare position prompts for each agent based on stance
+            prompts = []
+            for agent in self.agents:
+                # Determine agent's stance for opposition mode
+                stance = "neutral"
+                if opposition_mode:
+                    agent_cfg = next((cfg for cfg in self.config.agents_cfg 
+                                    if cfg["name"] == agent.name), None)
+                    if agent_cfg and "stance" in agent_cfg:
+                        stance = agent_cfg["stance"]
+                
+                # Select appropriate prompt based on stance
+                if opposition_mode and stance in ["affirmative", "negative"]:
+                    if stance == "affirmative":
+                        prompt = f"""
+🔥 [POSITION ROUND — Affirmative Position]
+You are an expert debater assigned to argue the AFFIRMATIVE position on:
+    "{topic}"
+
+Present the strongest possible case FOR this position, even if you might personally disagree.
+
+▪ Present a clear AFFIRMATIVE position in ≤ 250 words
+▪ Support your position with 3-5 verified facts, each with an MLA citation
+▪ Anticipate and preemptively address key counterarguments
+▪ Use precise, measured language focused on your strongest points
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+                    else:  # negative stance
+                        prompt = f"""
+🔥 [POSITION ROUND — Negative Position]
+You are an expert debater assigned to argue the NEGATIVE position on:
+    "{topic}"
+
+Present the strongest possible case AGAINST this position, even if you might personally agree.
+
+▪ Present a clear NEGATIVE position in ≤ 250 words
+▪ Support your critique with 3-5 verified facts, each with an MLA citation
+▪ Identify and emphasize key flaws in the affirmative position
+▪ Use precise, measured language focused on the weakest points of the opposing view
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+                else:
+                    # Use the standard position prompt for non-opposition or neutral agents
+                    prompt = POSITION_PROMPT.format(user_topic=topic)
+                
+                prompts.append((agent, prompt))
+            
+            # Execute position round with customized prompts
+            for agent, prompt in prompts:
+                await agent.speak(prompt, round_type="position")
+                
+        elif self.phase == "critique":
+            # Get all agents' latest positions
+            joined = "\n\n".join(f"AGENT {i+1} ({a.name}):\n{a.transcript[-1]['content']}" 
+                               for i, a in enumerate(self.agents))
+            
+            # Use enhanced critique prompt for all agents
+            critique_prompt = CRITIQUE_PROMPT.format(joined=joined)
+            
+            for agent in self.agents:
+                await agent.speak(critique_prompt, round_type="critique")
+                
+        elif self.phase == "defense":
+            # Prepare defense prompts with critiques directed at each agent
+            for i, agent in enumerate(self.agents):
+                # Extract critiques directed at this agent
+                critiques = []
+                for j, critic in enumerate(self.agents):
+                    if i != j:  # Skip self-critique
+                        critiques.append(f"FROM {critic.name}:\n{critic.transcript[-1]['content']}")
+                
+                # Use enhanced defense prompt
+                defense_prompt = DEFENSE_PROMPT.format(critiques="\n\n".join(critiques))
+                await agent.speak(defense_prompt, round_type="defense")
+        
         # After phase ends: if defense just finished, call judge
         if self.phase == "defense":
             verdict = await self._judge_consensus()
@@ -168,6 +255,7 @@ class DebateOrchestrator:
             })
             if verdict.get("agreement") and verdict.get("mean_agreement", 0) >= 0.75:
                 self.stopped = True
+        
         # Advance phase / round pointer
         if self.phase == "position":
             self.phase = "critique"
@@ -316,3 +404,148 @@ Your goal is to be persuasive while maintaining intellectual honesty.
                 position_prompt = POSITION_PROMPT.format(user_topic=user_topic)
             
             # Rest of the position phase handling remains the same
+
+# Replace the existing next_round method with this implementation that uses the enhanced prompts
+
+async def next_round(self, topic: str):
+    """Run the next round of the debate"""
+    if self.stopped: 
+        return
+    
+    # Get debate type and opposition mode settings
+    debate_type = self.config.debate_type
+    opposition_mode = self.config.opposition_mode
+    
+    # Run the appropriate phase with enhanced prompts
+    if self.phase == "position":
+        # Prepare position prompts for each agent based on stance
+        prompts = []
+        for agent in self.agents:
+            # Determine agent's stance for opposition mode
+            stance = "neutral"
+            if opposition_mode:
+                agent_cfg = next((cfg for cfg in self.config.agents_cfg 
+                                if cfg["name"] == agent.name), None)
+                if agent_cfg and "stance" in agent_cfg:
+                    stance = agent_cfg["stance"]
+            
+            # Select appropriate prompt based on stance
+            if opposition_mode and stance in ["affirmative", "negative"]:
+                if stance == "affirmative":
+                    prompt = f"""
+🔥 [POSITION ROUND — Affirmative Position]
+You are an expert debater assigned to argue the AFFIRMATIVE position on:
+    "{topic}"
+
+Present the strongest possible case FOR this position, even if you might personally disagree.
+
+▪ Present a clear AFFIRMATIVE position in ≤ 250 words
+▪ Support your position with 3-5 verified facts, each with an MLA citation
+▪ Anticipate and preemptively address key counterarguments
+▪ Use precise, measured language focused on your strongest points
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+                else:  # negative stance
+                    prompt = f"""
+🔥 [POSITION ROUND — Negative Position]
+You are an expert debater assigned to argue the NEGATIVE position on:
+    "{topic}"
+
+Present the strongest possible case AGAINST this position, even if you might personally agree.
+
+▪ Present a clear NEGATIVE position in ≤ 250 words
+▪ Support your critique with 3-5 verified facts, each with an MLA citation
+▪ Identify and emphasize key flaws in the affirmative position
+▪ Use precise, measured language focused on the weakest points of the opposing view
+▪ End with a 1-to-10 "Confidence Index" based on your supporting evidence
+
+Your goal is to be persuasive while maintaining intellectual honesty.
+"""
+            else:
+                # Use the standard position prompt for non-opposition or neutral agents
+                prompt = POSITION_PROMPT.format(user_topic=topic)
+            
+            prompts.append((agent, prompt))
+        
+        # Execute position round with customized prompts
+        for agent, prompt in prompts:
+            await agent.speak(prompt, round_type="position")
+            
+    elif self.phase == "critique":
+        # Get all agents' latest positions
+        joined = "\n\n".join(f"AGENT {i+1} ({a.name}):\n{a.transcript[-1]['content']}" 
+                           for i, a in enumerate(self.agents))
+        
+        # Use enhanced critique prompt for all agents
+        critique_prompt = CRITIQUE_PROMPT.format(joined=joined)
+        
+        for agent in self.agents:
+            await agent.speak(critique_prompt, round_type="critique")
+            
+    elif self.phase == "defense":
+        # Prepare defense prompts with critiques directed at each agent
+        for i, agent in enumerate(self.agents):
+            # Extract critiques directed at this agent
+            critiques = []
+            for j, critic in enumerate(self.agents):
+                if i != j:  # Skip self-critique
+                    critiques.append(f"FROM {critic.name}:\n{critic.transcript[-1]['content']}")
+            
+            # Use enhanced defense prompt
+            defense_prompt = DEFENSE_PROMPT.format(critiques="\n\n".join(critiques))
+            await agent.speak(defense_prompt, round_type="defense")
+    
+    # After phase ends: if defense just finished, call judge
+    if self.phase == "defense":
+        verdict = await self._judge_consensus()
+        self.history.append({
+            "round": self.round_num,
+            "verdict": verdict,
+        })
+        if verdict.get("agreement") and verdict.get("mean_agreement", 0) >= 0.75:
+            self.stopped = True
+    
+    # Advance phase / round pointer
+    if self.phase == "position":
+        self.phase = "critique"
+    elif self.phase == "critique":
+        self.phase = "defense"
+    elif self.phase == "defense":
+        self.phase = "position"
+        self.round_num += 1
+
+    def serialize(self) -> Dict[str,Any]:
+        return {
+            "config": self.config.__dict__,
+            "history": self.history,
+            "agents": [
+                {"name": a.name, "provider": type(a.provider).__name__, "transcript": a.transcript}
+                for a in self.agents
+            ]
+        }
+
+    def get_debate_state(self):
+        """Get current debate state as JSON for the judge."""
+        # Include opposition mode in the debate state
+        state = {
+            "round": self.round_num,
+            "phase": self.phase,
+            "config": {
+                "debate_type": self.config.debate_type,
+                "opposition_mode": self.config.opposition_mode
+            },
+            "agents": [
+                {
+                    "name": agent.name,
+                    "transcript": agent.transcript,
+                    "stance": next((cfg.get("stance", "neutral") 
+                                   for cfg in self.config.agents_cfg 
+                                   if cfg["name"] == agent.name), "neutral")
+                    if self.config.opposition_mode else "neutral"
+                }
+                for agent in self.agents
+            ]
+        }
+        return json.dumps(state)
