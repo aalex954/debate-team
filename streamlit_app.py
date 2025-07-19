@@ -433,99 +433,195 @@ if "orch" in st.session_state:
     timeline_tab, current_tab, full_tab = st.tabs(["Timeline", "Current Round", "Full Transcript"])
     
     with timeline_tab:
-        st.subheader("Debate Timeline")
+        st.subheader("Debate Flow")
         
-        # Timeline view - horizontal timeline with phases
-        phases = ["position", "critique", "defense"]
+        # Use a tabbed navigation system for rounds
         max_round = orch.round_num
+        phases = ["position", "critique", "defense"]
         
-        # Track clicked elements in session state
-        if "selected_turn" not in st.session_state:
-            st.session_state.selected_turn = None
+        # Create round navigation
+        round_tabs = st.tabs([f"Round {i+1}" for i in range(max_round + 1)])
         
-        # Create timeline
-        for round_num in range(max_round + 1):
-            st.markdown(f"### Round {round_num}")
-            
-            # Create columns for each phase
-            cols = st.columns(len(phases))
-            
-            for i, phase in enumerate(phases):
-                with cols[i]:
-                    st.markdown(f"**{phase.capitalize()}**")
+        # Setup for agent viewing
+        if "view_agent" not in st.session_state:
+            st.session_state.view_agent = None
+        
+        # Create content for each round tab
+        for round_idx, round_tab in enumerate(round_tabs):
+            with round_tab:
+                # Create a visual phase flow
+                cols = st.columns(3)
+                
+                # Display each phase in its own column
+                for phase_idx, phase in enumerate(phases):
+                    with cols[phase_idx]:
+                        # Phase header with clean styling
+                        st.markdown(f"""
+                        <div style="text-align: center; 
+                                    border-bottom: 2px solid #ddd; 
+                                    padding-bottom: 8px; 
+                                    margin-bottom: 12px; 
+                                    font-weight: bold;">
+                            {phase.capitalize()}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Add agent contributions for this phase
+                        for agent_idx, agent in enumerate(orch.agents):
+                            color = agent_colors[agent_idx]
+                            
+                            # Find matching transcript entry
+                            matching_entries = [t for t in agent.transcript 
+                                              if t["round"] == phase and 
+                                                 t.get("round_num", 0) == round_idx]
+                            
+                            if matching_entries:
+                                entry = matching_entries[-1]
+                                agent_key = f"{agent.name}_{round_idx}_{phase}"
+                                
+                                # Extract a preview (first sentence or first 40 chars)
+                                content = entry["content"]
+                                preview = (content.split('.')[0] if '.' in content[:100] else content[:40])
+                                preview = preview.replace('\n', ' ').strip()
+                                
+                                # Create a compact, interactive agent contribution card
+                                st.container().markdown(f"""
+                                <div style="
+                                    background-color: {color}22; 
+                                    border-left: 4px solid {color};
+                                    border-radius: 4px;
+                                    padding: 8px;
+                                    margin-bottom: 8px;
+                                    cursor: pointer;"
+                                    onclick="window.parent.postMessage(
+                                        {{type: 'streamlit:setComponentValue', value: '{agent_key}', key: 'view_agent'}}, '*')">
+                                    <div style="font-weight: bold; color: {color};">{agent.name}</div>
+                                    <div style="font-size: 0.85em; opacity: 0.9;">{preview}...</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                # Placeholder for future contributions
+                                st.container().markdown(f"""
+                                <div style="
+                                    background-color: #f0f0f0; 
+                                    border-left: 4px solid #ddd;
+                                    border-radius: 4px;
+                                    padding: 8px;
+                                    margin-bottom: 8px;
+                                    opacity: 0.5;">
+                                    <div style="font-weight: bold;">{agent.name}</div>
+                                    <div style="font-size: 0.85em;">Pending...</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                
+                # Add verdict for this round if available
+                round_verdict = next((item for item in orch.history if item['round'] == round_idx), None)
+                if round_verdict:
+                    verdict = round_verdict['verdict']
                     
-                    # Display agent responses for this phase and round
-                    for agent_idx, agent in enumerate(orch.agents):
+                    st.markdown("---")
+                    st.markdown("### Round Summary")
+                    
+                    # Display the agreement status
+                    if isinstance(verdict, dict):
+                        agreement = verdict.get("agreement", False)
+                        st.markdown(f"""
+                        <div style="
+                            background-color: {'#e6f7e6' if agreement else '#f7f7e6'}; 
+                            border-left: 4px solid {'#5cb85c' if agreement else '#f0ad4e'};
+                            border-radius: 4px;
+                            padding: 12px;
+                            margin: 10px 0;">
+                            <div style="font-weight: bold;">
+                                {'✓ Agreement Reached' if agreement else '⟳ Debate Continues'}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Show condensed verdict
+                    with st.expander("Judge's Verdict"):
+                        if isinstance(verdict, dict):
+                            if "explanation" in verdict:
+                                st.markdown(f"**Reasoning**: {verdict['explanation']}")
+                            
+                            # Display any scores present in the verdict
+                            for score_type in ["correctness_scores", "exploration_scores", "agent_scores"]:
+                                if score_type in verdict:
+                                    scores = verdict[score_type]
+                                    st.markdown(f"**{score_type.replace('_', ' ').title()}**:")
+                                    
+                                    for agent_name, score in scores.items():
+                                        agent_idx = next((idx for idx, ag in enumerate(orch.agents) 
+                                                         if ag.name == agent_name), 0)
+                                        color = agent_colors[agent_idx]
+                                        st.markdown(f"- **{agent_name}**: {float(score):.2f}")
+                        else:
+                            st.markdown(str(verdict))
+        
+        # Handle agent content viewing
+        if st.session_state.view_agent:
+            st.markdown("---")
+            st.subheader("Selected Content")
+            
+            try:
+                # Parse the selection key
+                agent_name, round_idx, phase = st.session_state.view_agent.split('_')
+                round_idx = int(round_idx)
+                
+                # Find the agent
+                agent = next((a for a in orch.agents if a.name == agent_name), None)
+                if agent:
+                    # Find the transcript entry
+                    entry = next((t for t in agent.transcript 
+                                 if t["round"] == phase and 
+                                    t.get("round_num", 0) == round_idx), None)
+                    
+                    if entry:
+                        # Get agent color
+                        agent_idx = next((idx for idx, ag in enumerate(orch.agents) 
+                                         if ag.name == agent_name), 0)
                         color = agent_colors[agent_idx]
                         
-                        # Find matching transcript entry
-                        matching_entries = [t for t in agent.transcript 
-                                           if t["round"] == phase and 
-                                              (round_num == 0 or round_num == orch.round_num)]
+                        # Create header
+                        st.markdown(f"""
+                        <div style="
+                            display: flex; 
+                            justify-content: space-between; 
+                            align-items: center;
+                            background-color: {color}22;
+                            border-radius: 4px;
+                            padding: 10px 15px;
+                            margin-bottom: 15px;">
+                            <div>
+                                <span style="font-size: 1.2em; font-weight: bold; color: {color};">
+                                    {agent_name}
+                            </span>
+                            <span style="margin-left: 8px; opacity: 0.8;">
+                                Round {int(round_idx)+1}, {phase.capitalize()}
+                            </span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
-                        if matching_entries:
-                            entry = matching_entries[-1]  # Get the latest matching entry
-                            
-                            # Create a unique key for this turn
-                            turn_key = f"{agent.name}_{round_num}_{phase}"
-                            
-                            # Create a styled button with agent's specific color
-                            button_html = f"""
-<div style="
-    background-color: {color}; 
-    color: white; 
-    padding: 8px 12px;
-    border-radius: 4px;
-    text-align: center;
-    margin: 4px 0px;
-    cursor: pointer;
-    font-weight: bold;
-    width: 100%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);" 
-    onclick="document.dispatchEvent(new CustomEvent('streamlit:buttonClicked', {{detail: '{turn_key}'}}))">
-    {agent.name}
-</div>
-"""
-                            st.markdown(button_html, unsafe_allow_html=True)
-
-                            if turn_key in st.session_state and st.session_state[turn_key]:
-                                st.session_state.selected_turn = (agent.name, round_num, phase, entry["content"])
-                                # Reset the button state
-                                st.session_state[turn_key] = False
-        
-        # Display selected turn content
-        if st.session_state.selected_turn:
-            agent_name, round_num, phase, content = st.session_state.selected_turn
-            st.markdown("---")
-            st.markdown(f"### {agent_name} - Round {round_num} ({phase.capitalize()})")
-            st.markdown(content)
-            if st.button("Clear Selection", key="clear_selection"):
-                st.session_state.selected_turn = None
-        
-        # Display judge verdicts in timeline
-        st.markdown("### Judge Verdicts")
-        for item in orch.history:
-            round_num = item['round']
-            verdict = item['verdict']
-            
-            # Format verdict nicely
-            if isinstance(verdict, dict):
-                explanation = verdict.get('explanation', 'No explanation provided')
-                agreement = verdict.get('agreement', False)
-                st.markdown(
-                    f"""<div style="padding:10px; border-left:5px solid {judge_color}; 
-                    background-color:#2E3C50; color: white; border-radius: 4px;">
-                    <strong>Round {round_num} Verdict:</strong> {"Agreement" if agreement else "No agreement yet"}<br>
-                    {explanation}</div>""", 
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    f"""<div style="padding:10px; border-left:5px solid {judge_color}; 
-                    background-color:#2E3C50; color: white; border-radius: 4px;">
-                    <strong>Round {round_num} Verdict:</strong> {verdict}</div>""", 
-                    unsafe_allow_html=True
-                )
+                        # Display content in a clean container
+                        st.markdown(f"""
+                        <div style="
+                            background-color: white;
+                            border: 1px solid #eee;
+                            border-radius: 4px;
+                            padding: 15px;
+                            margin-bottom: 20px;
+                            white-space: pre-wrap;">
+                            {entry["content"]}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Clear selection button
+                        if st.button("Close", key="clear_agent_view"):
+                            st.session_state.view_agent = None
+                            st.rerun()
+            except Exception as e:
+                st.error(f"Error displaying content: {e}")
     
     with current_tab:
         st.subheader("Current Round")
@@ -777,3 +873,113 @@ if "orch" in st.session_state and st.session_state.get("debate_type") == "non-bi
                     file_name="debate_insights.txt",
                     mime="text/plain",
                 )
+
+# Add this after the Round Counter and Winning Indicator section
+
+# Add judge verdict visualization
+if "orch" in st.session_state and orch.history and len(orch.history) > 0:
+    st.markdown("## Judge Verdict Evolution")
+    
+    # Process verdict history into a format suitable for charting
+    verdict_data = {}
+    rounds = []
+    
+    # Determine score type based on debate type
+    score_type = "correctness_scores" if st.session_state.get("debate_type") == "binary" else "exploration_scores"
+    fallback_score_types = ["agent_scores", "scores"]
+    
+    # Initialize agent data series
+    for agent in orch.agents:
+        verdict_data[agent.name] = []
+    
+    # Extract scores from each round's verdict
+    for item in orch.history:
+        round_num = item['round']
+        rounds.append(f"R{round_num}")
+        verdict = item['verdict']
+        
+        if isinstance(verdict, dict):
+            # Try to get scores using the primary score type
+            scores = verdict.get(score_type, {})
+            
+            # If not found, try fallback score types
+            if not scores:
+                for fallback_type in fallback_score_types:
+                    scores = verdict.get(fallback_type, {})
+                    if scores:
+                        break
+            
+            # If still no scores but there's a "most_correct_agent" or "most_insightful_agent"
+            if not scores:
+                top_agent_key = "most_correct_agent" if st.session_state.get("debate_type") == "binary" else "most_insightful_agent"
+                top_agent = verdict.get(top_agent_key, None)
+                
+                # Assign a high score to the top agent if specified
+                if top_agent:
+                    scores = {agent_name: 1.0 if agent_name == top_agent else 0.5 for agent_name in verdict_data.keys()}
+            
+            # Extract sentiment scores from explanation as a last resort
+            if not scores and "explanation" in verdict:
+                explanation = verdict["explanation"].lower()
+                sentiment_scores = {}
+                
+                for agent_name in verdict_data.keys():
+                    name_lower = agent_name.lower()
+                    score = 0.5  # Default neutral score
+                    
+                    if name_lower in explanation:
+                        # Find nearby sentiment words
+                        positive_words = ['strong', 'compelling', 'convincing', 'valid', 'sound', 'good', 'excellent']
+                        negative_words = ['weak', 'flawed', 'incorrect', 'inconsistent', 'problematic']
+                        
+                        for word in positive_words:
+                            if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
+                                score += 0.1
+                        
+                        for word in negative_words:
+                            if word in explanation and abs(explanation.find(name_lower) - explanation.find(word)) < 50:
+                                score -= 0.1
+                    
+                    sentiment_scores[agent_name] = max(0, min(1, score))  # Clamp between 0 and 1
+                
+                scores = sentiment_scores
+        
+            # Assign scores to each agent (default to previous score or 0.5 if not mentioned)
+            for agent_name in verdict_data.keys():
+                if agent_name in scores:
+                    verdict_data[agent_name].append(float(scores[agent_name]))
+                elif verdict_data[agent_name]:
+                    # Carry forward previous score if available
+                    verdict_data[agent_name].append(verdict_data[agent_name][-1])
+                else:
+                    # Default score for first appearance
+                    verdict_data[agent_name].append(0.5)
+        else:
+            # Default scores if verdict is not in expected format
+            for agent_name in verdict_data.keys():
+                verdict_data[agent_name].append(0.5)
+    
+    # Create a DataFrame for charting
+    import pandas as pd
+    df = pd.DataFrame(verdict_data, index=rounds)
+    
+    # Create line chart with custom styling
+    st.line_chart(df)
+    
+    # Add chart explanation
+    debate_measure = "correctness" if st.session_state.get("debate_type") == "binary" else "insight quality"
+    st.caption(f"This chart shows how the judge's assessment of each agent's {debate_measure} evolves over debate rounds.")
+    
+    # Show final ranking if debate has multiple rounds
+    if len(rounds) > 1:
+        st.subheader("Current Rankings")
+        # Get latest scores
+        final_scores = {agent: scores[-1] for agent, scores in verdict_data.items()}
+        sorted_agents = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Display rankings with medals
+        for rank, (agent_name, score) in enumerate(sorted_agents):
+            medal = "🥇" if rank == 0 else "🥈" if rank == 1 else "🥉" if rank == 2 else f"{rank+1}."
+            agent_idx = next((idx for idx, ag in enumerate(orch.agents) if ag.name == agent_name), 0)
+            color = agent_colors[agent_idx]
+            st.markdown(f"{medal} **{agent_name}** ({score:.2f})", unsafe_allow_html=True)
