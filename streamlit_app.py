@@ -6,44 +6,66 @@ from storage import save_session, load_session
 st.set_page_config(page_title="Scholarly Agent Debate", layout="wide")
 
 # ------------- Sidebar settings ----------------
-st.sidebar.header("Agent Config")
+# Replace the header with an expander
+with st.sidebar.expander("Agent Config", expanded=True):
+    def default_agents():
+        return [
+            {"name": "OpenAI", "provider_name": "openai", "model": "gpt-4o-mini"},
+            {"name": "Mistral", "provider_name": "mistral", "model": "mistral-large-latest"},
+        ]
 
-def default_agents():
-    return [
-        {"name": "OpenAI", "provider_name": "openai", "model": "gpt-4o-mini"},
-        {"name": "Mistral", "provider_name": "mistral", "model": "mistral-large-latest"},
-    ]
+    # Initialize agent configs if not in session state
+    if "agent_cfgs" not in st.session_state:
+        st.session_state.agent_cfgs = default_agents()
+        st.session_state.prev_a_num = len(st.session_state.agent_cfgs)
+    
+    # Number input for agent count
+    a_num = st.number_input("# Agents", min_value=2, max_value=8, value=len(st.session_state.agent_cfgs))
+    
+    # Handle changes in agent count
+    if a_num != st.session_state.prev_a_num:
+        # Adding new agents
+        if a_num > st.session_state.prev_a_num:
+            # Add new default agents with unique names
+            for i in range(st.session_state.prev_a_num, a_num):
+                if i % 2 == 0:  # Alternate between providers for diversity
+                    new_agent = {"name": f"OpenAI-{i+1}", "provider_name": "openai", "model": "gpt-4o-mini"}
+                else:
+                    new_agent = {"name": f"Mistral-{i+1}", "provider_name": "mistral", "model": "mistral-large-latest"}
+                st.session_state.agent_cfgs.append(new_agent)
+        # Removing agents
+        else:
+            st.session_state.agent_cfgs = st.session_state.agent_cfgs[:a_num]
+        
+        # Update previous count
+        st.session_state.prev_a_num = a_num
 
-a_num = st.sidebar.number_input("# Agents", min_value=2, max_value=8, value=2)  # Default to 2 agents
-if "agent_cfgs" not in st.session_state:
-    st.session_state.agent_cfgs = default_agents()[:a_num]
+    # Display configuration controls for each agent
+    for i in range(a_num):
+        cfg = st.session_state.agent_cfgs[i]
+        st.text_input(f"Agent {i+1} Name", value=cfg["name"], key=f"name{i}")
+        provider_options = ["openai", "anthropic", "mistral", "local"]
+        st.selectbox(
+            "Provider", provider_options,
+            index=provider_options.index(cfg["provider_name"]),
+            key=f"prov{i}")
+        # Model dropdown options per provider
+        model_options = {
+            "openai": ["gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
+            "anthropic": ["claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1"],
+            "mistral": ["mistral-large-latest", "mistral-medium", "mistral-small"],
+            "local": ["llama3", "llama2", "mistral-7b", "custom"]
+        }
+        selected_provider = st.session_state.get(f"prov{i}", cfg["provider_name"])
+        st.selectbox(
+            "Model", model_options.get(selected_provider, [cfg["model"]]),
+            index=model_options.get(selected_provider, [cfg["model"]]).index(cfg["model"]) if cfg["model"] in model_options.get(selected_provider, [cfg["model"]]) else 0,
+            key=f"model{i}")
 
-for i in range(a_num):
-    cfg = st.session_state.agent_cfgs[i]
-    st.sidebar.text_input(f"Agent {i+1} Name", value=cfg["name"], key=f"name{i}")
-    provider_options = ["openai", "anthropic", "mistral", "local"]
-    st.sidebar.selectbox(
-        "Provider", provider_options,
-        index=provider_options.index(cfg["provider_name"]),
-        key=f"prov{i}")
-    # Model dropdown options per provider
-    model_options = {
-        "openai": ["gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
-        "anthropic": ["claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-2.1"],
-        "mistral": ["mistral-large-latest", "mistral-medium", "mistral-small"],
-        "local": ["llama3", "llama2", "mistral-7b", "custom"]
-    }
-    selected_provider = st.session_state.get(f"prov{i}", cfg["provider_name"])
-    st.sidebar.selectbox(
-        "Model", model_options.get(selected_provider, [cfg["model"]]),
-        index=model_options.get(selected_provider, [cfg["model"]]).index(cfg["model"]) if cfg["model"] in model_options.get(selected_provider, [cfg["model"]]) else 0,
-        key=f"model{i}")
+    judge_model = st.text_input("Judge Model (OpenAI)", value="gpt-4o-mini")
+    auto_run = st.checkbox("Auto‑advance rounds", value=False)
 
-judge_model = st.sidebar.text_input("Judge Model (OpenAI)", value="gpt-4o-mini")
-
-st.sidebar.markdown("---")
-auto_run = st.sidebar.checkbox("Auto‑advance rounds", value=False)
-
+# Keep these sections outside the expander
 st.sidebar.markdown("---")
 if st.sidebar.button("Save Session") and "orch" in st.session_state:
     path = f"debate_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
