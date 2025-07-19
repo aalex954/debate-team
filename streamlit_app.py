@@ -72,11 +72,82 @@ if st.sidebar.button("Save Session") and "orch" in st.session_state:
     save_session(path, st.session_state.orch)
     st.sidebar.success(f"Saved → {path}")
 
-if st.sidebar.button("Load Session"):
-    uploaded = st.sidebar.file_uploader("Choose .json", type="json")
-    if uploaded:
-        data = json.load(uploaded)
-        st.write(data)
+# Always show file uploader (not conditional on button click)
+uploaded = st.sidebar.file_uploader("Load Debate Session", type="json", key="debate_file")
+
+# Add a flag in session state to track if we've processed this file already
+if "last_processed_file" not in st.session_state:
+    st.session_state.last_processed_file = None
+
+# Add a separate load button that checks if a file is uploaded
+if uploaded and st.sidebar.button("Load Selected File"):
+    # Create a file identifier using name and size
+    file_identifier = f"{uploaded.name}_{uploaded.size}"
+    
+    # Check if we've already processed this file
+    if file_identifier != st.session_state.last_processed_file:
+        try:
+            # Read the data
+            data = json.load(uploaded)
+            
+            # Debug info to verify data structure
+            st.sidebar.write(f"Found {len(data['agents'])} agents in file")
+            
+            # Reconstruct the DebateConfig from saved data
+            agents_cfg = data["config"]["agents_cfg"]
+            judge_cfg = data["config"]["judge_cfg"]
+            auto = data["config"]["auto"]
+            config = DebateConfig(agents_cfg, judge_cfg, auto)
+            
+            # Create a new orchestrator with the config
+            orch = DebateOrchestrator(config)
+            
+            # Restore orchestrator state
+            orch.history = data["history"]
+            orch.round_num = data["history"][-1]["round"] if data["history"] else 0
+            
+            # Determine current phase based on last agent transcript entry
+            if data["agents"] and data["agents"][0]["transcript"]:
+                last_round_type = data["agents"][0]["transcript"][-1]["round"]
+                if last_round_type == "position":
+                    orch.phase = "critique"
+                elif last_round_type == "critique":
+                    orch.phase = "defense"
+                elif last_round_type == "defense":
+                    orch.phase = "position"
+                    orch.round_num += 1
+            
+            # Restore agent transcripts
+            for i, agent_data in enumerate(data["agents"]):
+                if i < len(orch.agents):  # Make sure we don't go out of bounds
+                    orch.agents[i].transcript = agent_data["transcript"]
+            
+            # Save to session state
+            st.session_state.orch = orch
+            
+            # Try to extract original topic from position statements if available
+            if data["agents"] and data["agents"][0]["transcript"]:
+                for entry in data["agents"][0]["transcript"]:
+                    if entry["round"] == "position":
+                        # Get the first few words of the position statement as topic
+                        content = entry["content"]
+                        topic_hint = content.split("Question:", 1)[-1].strip()
+                        if topic_hint:
+                            st.session_state.topic = topic_hint[:100] + "..."
+                            break
+                
+            # If we couldn't extract a topic, use a placeholder
+            if "topic" not in st.session_state or not st.session_state.topic:
+                st.session_state.topic = "Loaded debate session"
+            
+            # Mark this file as processed
+            st.session_state.last_processed_file = file_identifier
+            
+            st.sidebar.success("Session loaded successfully!")
+            st.rerun()  # Use rerun instead of experimental_rerun
+        except Exception as e:
+            st.sidebar.error(f"Error loading session: {e}")
+            st.sidebar.write(f"Error details: {type(e).__name__}: {str(e)}")
 
 # ------------- Main UI ----------------
 st.title("📚 Scholarly Agent Debate")
